@@ -1013,6 +1013,21 @@ export async function saveStoredLogLevel(level: AppLogLevel) {
 }
 
 export async function getStoredAiSettings(): Promise<AiProviderSettings> {
+  const intranet = getAppRuntime().ai.intranet;
+  if (intranet) {
+    const { baseUrl, model } = await intranet.getConfig();
+    return { providers: baseUrl && model ? [{
+      id: "intranet-model",
+      name: "内网 AI",
+      type: "openai-compatible",
+      apiStyle: "openai-compatible",
+      baseUrl,
+      apiKey: "",
+      enabled: true,
+      defaultModelId: model,
+      models: [{ id: model, name: model, enabled: true, capabilities: ["text", "tools"] }]
+    }] : [] };
+  }
   const store = await loadSettingsStore();
   const settings = await store.get<AiProviderSettings>(aiProvidersKey);
 
@@ -1020,6 +1035,7 @@ export async function getStoredAiSettings(): Promise<AiProviderSettings> {
 }
 
 export async function getStoredAcpAgentSettings(): Promise<AcpAgentSettings> {
+  if (getAppRuntime().ai.intranet) return defaultAcpAgentSettings;
   const store = await loadSettingsStore();
   const settings = await store.get<Partial<AcpAgentSettings>>(acpAgentSettingsKey);
 

@@ -384,7 +384,7 @@ function createServerSentEventParser() {
       return finalBlock.trim() ? parseServerSentEventBlock(finalBlock) : [];
     },
     push(chunk: string) {
-      buffer += chunk.replace(/\r\n/g, "\n");
+      buffer = (buffer + chunk).replace(/\r\n/g, "\n");
       const blocks = buffer.split("\n\n");
       buffer = blocks.pop() ?? "";
 

@@ -1339,6 +1339,25 @@ describe("useAiAgentSession", () => {
     expect(result.current.status).toBe("error");
   });
 
+  it("does not publish an edit when the current document no longer matches the one read by the model", async () => {
+    const onAiResult = vi.fn();
+    let current = "# Draft";
+    mockedRunDocumentAiAgent.mockImplementation(async ({ documentContent, onPreviewResult }) => {
+      expect(documentContent).toBe("# Draft");
+      current = "# A different note";
+      onPreviewResult?.({ from: 2, original: "Draft", replacement: "Polished draft", to: 7, type: "replace" });
+      return { content: "Prepared edit", finishReason: "stop", preparedPreview: true };
+    });
+    const { result } = renderAiAgentSession({
+      getDocumentContent: () => current,
+      isDocumentCurrent: (content) => current === content,
+      onAiResult
+    });
+    await act(async () => { await result.current.submit("Polish this"); });
+    expect(onAiResult).not.toHaveBeenCalled();
+    expect(result.current.messages.at(-1)).toMatchObject({ isError: true, text: "app.aiPreviewDocumentChanged" });
+  });
+
   it("forwards document edit tool results into the editor preview flow", async () => {
     const onAiResult = vi.fn();
     mockedRunDocumentAiAgent.mockImplementation(async ({ onPreviewResult }) => {

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createDefaultAppRuntime, type NativeMarkdownOpenTarget } from "@markra/app/runtime";
 import type { ElectronBridge } from "../electron/bridge";
 import { createElectronRuntime } from "./runtime";
@@ -8,6 +8,12 @@ function createBridge() {
   const stores = new Map<string, Map<string, unknown>>();
   const state = { open: true };
   const bridge: ElectronBridge = {
+    ai: {
+      getConfig: async () => ({ baseUrl: "", model: "", apiKey: "" }),
+      saveConfig: async (config) => config,
+      chat: async () => ({ status: 200 }),
+      stop: async () => undefined
+    },
     files: createDefaultAppRuntime().files,
     themes: {
       list: async (directory) => ({ directory: directory ?? "/themes", files: ["light.css"] }),
@@ -57,6 +63,32 @@ function createBridge() {
 }
 
 describe("Electron runtime", () => {
+  it("shows chunks before the request completes and discards queued chunks after stop", async () => {
+    const { bridge } = createBridge();
+    const pending = Promise.withResolvers<{ status: number }>();
+    let sendChunk: ((chunk: string) => unknown) | undefined;
+    bridge.ai.chat = vi.fn((_id, _request, onChunk) => {
+      sendChunk = onChunk;
+      onChunk?.("第一段");
+      return pending.promise;
+    });
+    bridge.ai.stop = vi.fn(async () => undefined);
+    const runtime = createElectronRuntime(bridge);
+    const controller = new AbortController();
+    const onChunk = vi.fn();
+    const request = { body: "{}", headers: { authorization: "ignored" }, url: "http://localhost/v1/chat/completions" };
+    const result = runtime.ai.requestChatStream(request, onChunk, controller.signal);
+    expect(onChunk.mock.calls).toEqual([["第一段"]]);
+    controller.abort();
+    sendChunk?.("停止后排队的内容");
+    pending.resolve({ status: 200 });
+    await result;
+    expect(bridge.ai.stop).toHaveBeenCalledExactlyOnceWith(1);
+    expect(onChunk.mock.calls).toEqual([["第一段"]]);
+    await expect(runtime.ai.requestChatStream(request, onChunk, controller.signal)).rejects.toThrow();
+    expect(bridge.ai.chat).toHaveBeenCalledExactlyOnceWith(1, { body: request.body, url: request.url }, expect.any(Function));
+  });
+
   it("delivers settings changes across windows until a listener is removed", async () => {
     const { bridge } = createBridge();
     const editor = createElectronRuntime(bridge);

@@ -75,6 +75,7 @@ type AiAgentPanelProps = {
   selectedModelId?: string | null;
   selectedProviderId?: string | null;
   status?: "error" | "idle" | "streaming" | "thinking";
+  showWebSearchControl?: boolean;
   thinkingEnabled?: boolean;
   webSearchAvailable?: boolean;
   webSearchEnabled?: boolean;
@@ -138,6 +139,7 @@ export function AiAgentPanel({
   selectedModelId = null,
   selectedProviderId = null,
   status = "idle",
+  showWebSearchControl = true,
   thinkingEnabled = false,
   webSearchAvailable = false,
   webSearchEnabled = false,
@@ -212,7 +214,7 @@ export function AiAgentPanel({
   const acpSelectedModel = acpModels.find((model) => model.id === selectedAcpModelId) ?? acpModels[0] ?? null;
   const showProviderModeControls = !acpAgentEnabled;
   const supportsThinking = !acpAgentEnabled && (selectedModel?.capabilities.includes("reasoning") ?? false);
-  const supportsWebSearch = !acpAgentEnabled && webSearchAvailable;
+  const supportsWebSearch = showWebSearchControl && !acpAgentEnabled && webSearchAvailable;
   const providerModelLabel =
     selectedModel
       ? `${selectedModel.providerName} · ${selectedModel.name}`
@@ -925,7 +927,7 @@ export function AiAgentPanel({
                       <BrainCircuit aria-hidden="true" size={14} />
                       <span>{label("app.aiDeepThinking")}</span>
                     </ToggleButton>
-                    <ToggleButton
+                    {showWebSearchControl ? <ToggleButton
                       label={label("app.aiWebSearch")}
                       tooltip={label("app.aiWebSearch")}
                       pressed={webSearchEnabled}
@@ -934,7 +936,7 @@ export function AiAgentPanel({
                     >
                       <Globe2 aria-hidden="true" size={14} />
                       <span>{label("app.aiWebSearch")}</span>
-                    </ToggleButton>
+                    </ToggleButton> : null}
                   </>
                 ) : null}
               </div>
@@ -942,7 +944,7 @@ export function AiAgentPanel({
                 className="disabled:opacity-40"
                 type={submitting ? "button" : "submit"}
                 disabled={!canSend && !submitting}
-                label={label("app.aiAgentSend")}
+                label={label(submitting ? "app.aiCommandStop" : "app.aiAgentSend")}
                 onClick={submitting ? onInterrupt : undefined}
               >
                 {submitting ? <X aria-hidden="true" size={16} /> : <ArrowUp aria-hidden="true" size={16} />}

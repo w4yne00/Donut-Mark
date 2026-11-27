@@ -1,6 +1,9 @@
 import type {
   AppFileRuntime,
   AppThemesRuntime,
+  IntranetAiConfig,
+  NativeAiChatRequest,
+  NativeAiStreamResponse,
   NativeEditorWindowRestoreState,
   NativeSettingsWindowTarget,
   RuntimeStoreLoadOptions,
@@ -33,6 +36,12 @@ export type ElectronSettings = {
 export type WindowAction = "close" | "destroy" | "minimize" | "maximize" | "fullscreen" | "show";
 
 export type ElectronBridge = {
+  ai: {
+    getConfig: () => Promise<IntranetAiConfig>;
+    saveConfig: (config: IntranetAiConfig) => Promise<IntranetAiConfig>;
+    chat: (id: number, request: Pick<NativeAiChatRequest, "url" | "body">, onChunk?: (chunk: string) => unknown) => Promise<NativeAiStreamResponse>;
+    stop: (id: number) => Promise<unknown>;
+  };
   files: ElectronFiles;
   themes: AppThemesRuntime;
   settings: ElectronSettings;
@@ -61,10 +70,7 @@ export const settingsEvents = new Set([
   "markra://editor-preferences-changed",
   "markra://export-settings-changed",
   "markra://file-ignore-settings-changed",
-  "markra://web-search-settings-changed",
   "markra://backup-settings-changed",
   "markra://sync-settings-changed",
-  "markra://ai-settings-changed",
-  "markra://acp-agent-settings-changed",
   "markra://theme-files-changed"
 ]);

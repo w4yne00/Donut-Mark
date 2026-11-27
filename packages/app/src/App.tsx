@@ -477,6 +477,7 @@ function WorkspaceApp() {
     appFiles.listMarkdownReferenceFilesForPath && appFiles.trashMarkdownAssets
   );
   const aiFeatureEnabled = appFeatures.ai;
+  const intranetAi = getAppRuntime().ai.intranet;
   const exportFeatureEnabled = appFeatures.export;
   const markdownBundleFeatureEnabled = exportFeatureEnabled && appFeatures.markdownBundle === true;
   const nativeWindowChromeEnabled = appFeatures.nativeWindowChrome;
@@ -1481,6 +1482,14 @@ function WorkspaceApp() {
     setAiResults(results);
   }, []);
   const getPendingAiResult = useCallback(() => aiResultsRef.current.at(-1) ?? null, []);
+  const aiDocumentRef = useRef({ activeTabId, path: document.path, revision: document.revision, activeImageFile, getAiDocumentContent });
+  aiDocumentRef.current = { activeTabId, path: document.path, revision: document.revision, activeImageFile, getAiDocumentContent };
+  const intranetPreviews = useRef<{ ids: Set<string>; isCurrent: () => boolean } | null>(null);
+  const isCurrentAiDocument = useCallback((markdown: string) => {
+    const current = aiDocumentRef.current;
+    return !!activeTabId && !current.activeImageFile && current.activeTabId === activeTabId &&
+      current.path === document.path && current.revision === document.revision && current.getAiDocumentContent() === markdown;
+  }, [activeTabId, document.path, document.revision]);
   const hasAiCommandContext = aiFeatureEnabled && !sourceSurfaceActive && Boolean(activeAiSelection?.text.trim());
   const selectedInlineAiModel =
     aiSettings.availableTextModels.find(
@@ -1492,14 +1501,22 @@ function WorkspaceApp() {
     ) ?? aiSettings.availableTextModels[0];
   const aiAgentProviderName = selectedAiAgentModel?.providerName ?? aiSettings.agentProvider?.name ?? null;
   const aiAgentModelName = selectedAiAgentModel?.name ?? aiSettings.agentModelId ?? null;
-  const webSearchAvailable = aiFeatureEnabled && aiAgentWebSearchAvailable({
+  const webSearchAvailable = aiFeatureEnabled && !intranetAi && aiAgentWebSearchAvailable({
     model: selectedAiAgentModel,
     provider: aiSettings.agentProvider,
     settings: webSearchSettings.settings,
     settingsLoading: webSearchSettings.loading
   });
   const handleAiResult = useCallback(
-    (result: AiDiffResult, previewId?: string) => {
+    (result: AiDiffResult, previewId?: string, documentContent?: string) => {
+      if (intranetAi && result.type !== "error") {
+        if (!previewId || documentContent === undefined || !isCurrentAiDocument(documentContent)) return;
+        if (!intranetPreviews.current?.isCurrent()) {
+          editor.clearAiPreview();
+          intranetPreviews.current = { ids: new Set(), isCurrent: () => isCurrentAiDocument(documentContent) };
+        }
+        intranetPreviews.current.ids.add(previewId);
+      }
       editor.clearAiSelection();
       appliedAiPreviewKeysRef.current.clear();
       editor.previewAiResult(result, {
@@ -1518,7 +1535,7 @@ function WorkspaceApp() {
       });
       updateAiResults(editor.listAiPreviews());
     },
-    [editor, translate, updateAiResults]
+    [editor, intranetAi, isCurrentAiDocument, translate, updateAiResults]
   );
   const handleAiPreviewReady = useCallback((result: AiDiffResult, previewId?: string) => {
     editor.scrollToAiPreview(result, { previewId });
@@ -1536,6 +1553,7 @@ function WorkspaceApp() {
     getPendingResult: getPendingAiResult,
     getSelectedAcpModelId: () => selectedAcpModelIdRef.current,
     getSelection: getActiveAiSelection,
+    isDocumentCurrent: intranetAi ? isCurrentAiDocument : undefined,
     model: aiSettings.inlineModelId,
     onAiResult: handleAiResult,
     provider: aiSettings.inlineProvider,
@@ -1599,6 +1617,7 @@ function WorkspaceApp() {
     getSectionAnchors: editor.getSectionAnchors,
     getSelection: getActiveAiSelection,
     getTableAnchors: editor.getTableAnchors,
+    isDocumentCurrent: intranetAi ? isCurrentAiDocument : undefined,
     model: aiSettings.agentModelId,
     onAiPreviewReady: handleAiPreviewReady,
     onAiResult: handleAiResult,
@@ -2121,6 +2140,14 @@ function WorkspaceApp() {
       return;
     }
 
+    if (intranetAi && (!previewId || !intranetPreviews.current?.ids.has(previewId) || !intranetPreviews.current.isCurrent() ||
+      !editor.listAiPreviews().some((pending) => aiResultSignature(pending) === aiResultSignature(result)))) {
+      editor.clearAiPreview(result, { previewId });
+      updateAiResults(editor.listAiPreviews());
+      showAppToast({ message: translate("app.aiPreviewDocumentChanged"), status: "error" });
+      return;
+    }
+
     debug(() => ["[markra-ai-preview] app handle apply", {
       from: result.type === "error" ? null : result.from,
       mode,
@@ -2154,7 +2181,7 @@ function WorkspaceApp() {
       editor.clearAiSelection();
       handleAiCommandClose();
     }
-  }, [aiResults, editor, handleAiCommandClose, readOnlyMode, updateAiResults]);
+  }, [aiResults, editor, handleAiCommandClose, intranetAi, readOnlyMode, translate, updateAiResults]);
   const handleRejectAiResult = useCallback((result?: AiDiffResult | null, previewId?: string) => {
     editor.clearAiSelection();
     editor.clearAiPreview(result ?? undefined, { previewId });
@@ -4717,6 +4744,7 @@ function WorkspaceApp() {
         selectedModelId={aiSettings.agentModelId}
         selectedProviderId={aiSettings.agentProviderId}
         status={aiAgent.status}
+        showWebSearchControl={!intranetAi}
         thinkingEnabled={aiAgent.thinkingEnabled}
         webSearchAvailable={webSearchAvailable}
         webSearchEnabled={aiAgent.webSearchEnabled}

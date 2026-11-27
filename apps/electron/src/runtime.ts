@@ -8,6 +8,7 @@ import {
   currentContextMenuPosition,
   showContextMenu,
   type AppRuntime,
+  type NativeAiChatRequest,
   type RuntimeCleanup
 } from "@markra/app/runtime";
 import type { ElectronBridge } from "../electron/bridge";
@@ -41,6 +42,7 @@ function unavailable(feature: string): Promise<never> {
 
 export function createElectronRuntime(bridge: ElectronBridge): AppRuntime {
   const defaults = createDefaultAppRuntime();
+  let nextAiRequestId = 0;
   const listen = (name: string, handler: (payload: unknown) => unknown) =>
     bridge.onEvent((eventName, payload) => {
       if (eventName === name) return handler(payload);
@@ -48,8 +50,29 @@ export function createElectronRuntime(bridge: ElectronBridge): AppRuntime {
 
   return {
     ...defaults,
+    ai: {
+      ...defaults.ai,
+      intranet: { getConfig: bridge.ai.getConfig, saveConfig: bridge.ai.saveConfig },
+      requestChat: async ({ body, url }) => {
+        const response = await bridge.ai.chat(++nextAiRequestId, { body, url });
+        return { status: response.status, body: response.body };
+      },
+      async requestChatStream({ body, url }: NativeAiChatRequest, onChunk, signal) {
+        signal?.throwIfAborted();
+        const id = ++nextAiRequestId;
+        const cancel = () => bridge.ai.stop(id).catch(() => console.warn("无法通知主进程停止内网 AI 请求。"));
+        signal?.addEventListener("abort", cancel, { once: true });
+        try {
+          return await bridge.ai.chat(id, { body, url }, (chunk) => {
+            if (!signal?.aborted) return onChunk(chunk);
+          });
+        } finally {
+          signal?.removeEventListener("abort", cancel);
+        }
+      }
+    },
     features: {
-      ai: false,
+      ai: true,
       export: false,
       nativeWindowChrome: false,
       networkProxy: false,

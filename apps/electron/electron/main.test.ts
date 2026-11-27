@@ -1,5 +1,6 @@
 import { mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
+import { createServer, type RequestListener } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { app, BrowserWindow } from "electron";
@@ -127,7 +128,92 @@ async function invoke(window: BrowserWindow, name: string, ...args: unknown[]) {
   return handler({ sender: window.webContents, senderFrame: window.webContents.mainFrame }, ...args);
 }
 
+async function withModelServer(handle: RequestListener, test: (url: string) => Promise<unknown>) {
+  const server = createServer(handle);
+  try {
+    await new Promise<unknown>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", () => resolve(undefined));
+    });
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("Missing test server address");
+    await test(`http://127.0.0.1:${address.port}`);
+  } finally {
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+}
+
 describe("Electron main process", () => {
+  it("streams only from the saved model endpoint and stops the upstream request", async () => {
+    const received = vi.fn();
+    const disconnected = Promise.withResolvers<unknown>();
+    await withModelServer(async (request, response) => {
+      const chunks: Buffer[] = [];
+      for await (const chunk of request) chunks.push(chunk);
+      received(request.url, request.headers.authorization, JSON.parse(Buffer.concat(chunks).toString()));
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      response.write('data: {"text":"第一段"}\n\n');
+      response.on("close", () => disconnected.resolve(undefined));
+    }, async (url) => {
+      await start();
+      const editor = BrowserWindow.getAllWindows()[0];
+      const body = JSON.stringify({
+        model: "manual-model", messages: [{ role: "user", content: "你好" }], stream: true,
+        web_search_options: {}, enable_search: true,
+        tools: [{ type: "web_search" }, { type: "function", function: { name: "read_document" } }]
+      });
+      const request = { url: `${url}/gateway/v1/chat/completions`, body };
+      await expect(invoke(editor, "markra:ai-chat", 1, request, true)).rejects.toThrow();
+      expect(received).not.toHaveBeenCalled();
+      await expect(invoke(editor, "markra:ai-config-save", { baseUrl: url, model: "manual-model", apiKey: "test-token" })).rejects.toThrow();
+      await invoke(editor, "markra:settings-open");
+      const settings = BrowserWindow.getAllWindows()[1];
+      await invoke(settings, "markra:ai-config-save", { baseUrl: `${url}/gateway/`, model: "manual-model", apiKey: "test-token" });
+      await expect(invoke(editor, "markra:ai-config")).resolves.toEqual({ baseUrl: `${url}/gateway/v1`, model: "manual-model", apiKey: "" });
+      await expect(invoke(editor, "markra:ai-chat", 1, { ...request, url: `${url}/other/v1/chat/completions` }, true)).rejects.toThrow();
+      expect(received).not.toHaveBeenCalled();
+
+      const run = invoke(editor, "markra:ai-chat", 2, { ...request, headers: { Authorization: "fake" } }, true);
+      const stopped = expect(run).resolves.toMatchObject({ status: 499 });
+      await expect.poll(() => vi.mocked(editor.webContents.send).mock.calls).toContainEqual([
+        "markra:event", "markra:ai-chunk-2", 'data: {"text":"第一段"}\n\n'
+      ]);
+      expect(received).toHaveBeenCalledExactlyOnceWith("/gateway/v1/chat/completions", "Bearer test-token", {
+        model: "manual-model", messages: [{ role: "user", content: "你好" }], stream: true,
+        tools: [{ type: "function", function: { name: "read_document" } }]
+      });
+      await invoke(editor, "markra:ai-stop", 2);
+      await stopped;
+      await disconnected.promise;
+    });
+  });
+
+  it.each([302, 307, 503])("does not leave the saved endpoint after HTTP %s", async (status) => {
+    const received = vi.fn();
+    const other = vi.fn();
+    await withModelServer((_request, response) => {
+      other();
+      response.end();
+    }, async (outside) => withModelServer((request, response) => {
+      received(request.url);
+      response.writeHead(status, { location: `${outside}/other` }).end();
+    }, async (url) => {
+      await start();
+      const editor = BrowserWindow.getAllWindows()[0];
+      await invoke(editor, "markra:settings-open");
+      await invoke(BrowserWindow.getAllWindows()[1], "markra:ai-config-save", { baseUrl: url, model: "manual-model", apiKey: "" });
+      const request = { url: `${url}/v1/chat/completions`, body: JSON.stringify({ model: "manual-model", messages: [] }) };
+      if (status === 503) {
+        await expect(invoke(editor, "markra:ai-chat", 1, request, false)).resolves.toMatchObject({ status });
+      } else {
+        await expect(invoke(editor, "markra:ai-chat", 1, request, false)).rejects.toThrow();
+      }
+      expect(received).toHaveBeenCalledExactlyOnceWith("/v1/chat/completions");
+      expect(other).not.toHaveBeenCalled();
+    }));
+  });
+
   it("restores a picked theme directory without granting access to other directories or documents", async () => {
     const selected = join(directory, "themes");
     const other = join(directory, "other");

@@ -2,8 +2,9 @@ import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, protocol, session
 import { dirname, join, resolve, sep } from "node:path";
 import { realpath } from "node:fs/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import type { NativeEditorWindowRestoreState, NativeSettingsWindowTarget, SetNativeEditorWindowRestoreStateInput } from "@markra/app/runtime";
+import type { NativeAiChatRequest, NativeEditorWindowRestoreState, NativeSettingsWindowTarget, SetNativeEditorWindowRestoreStateInput } from "@markra/app/runtime";
 import { settingsEvents, type ElectronBridge } from "./bridge";
+import { createElectronAi } from "./ai";
 import { createElectronFiles } from "./files";
 import { createElectronSettings } from "./settings";
 import { createElectronThemes } from "./themes";
@@ -11,7 +12,7 @@ import { createElectronThemes } from "./themes";
 const appUrl = "markra://app/index.html";
 const bundleDirectory = dirname(fileURLToPath(import.meta.url));
 const rendererDirectory = resolve(bundleDirectory, "../dist");
-const windows = new Map<number, { window: BrowserWindow; settings: boolean; watches: Map<number, () => unknown>; restore?: NativeEditorWindowRestoreState }>();
+const windows = new Map<number, { window: BrowserWindow; settings: boolean; watches: Map<number, () => unknown>; aiRequests: Map<number, AbortController>; restore?: NativeEditorWindowRestoreState }>();
 let fileService: Awaited<ReturnType<typeof createElectronFiles>>;
 let quitting = false;
 let exitRestoreStates: NativeEditorWindowRestoreState[] | null = null;
@@ -78,13 +79,16 @@ function createWindow({ settings = false, path, target, blank = false }: {
   });
   const id = window.webContents.id;
   const watches = new Map<number, () => unknown>();
-  const stopWatches = () => {
+  const aiRequests = new Map<number, AbortController>();
+  const stopWindowTasks = () => {
     for (const stop of watches.values()) stop();
     watches.clear();
+    for (const request of aiRequests.values()) request.abort();
+    aiRequests.clear();
   };
-  windows.set(id, { window, settings, watches });
-  window.webContents.on("did-navigate", stopWatches);
-  window.webContents.on("render-process-gone", stopWatches);
+  windows.set(id, { window, settings, watches, aiRequests });
+  window.webContents.on("did-navigate", stopWindowTasks);
+  window.webContents.on("render-process-gone", stopWindowTasks);
   window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   window.webContents.on("will-navigate", (event) => event.preventDefault());
   window.webContents.on("will-attach-webview", (event) => event.preventDefault());
@@ -95,7 +99,7 @@ function createWindow({ settings = false, path, target, blank = false }: {
     }
   });
   window.on("closed", () => {
-    stopWatches();
+    stopWindowTasks();
     windows.delete(id);
     if (![...windows.values()].some((state) => !state.settings)) {
       for (const state of windows.values()) state.window.destroy();
@@ -181,6 +185,7 @@ async function start() {
   });
   const files = fileService.files;
   const stores = createElectronSettings(app.getPath("userData"));
+  const ai = createElectronAi(app.getPath("userData"));
   const themes = createElectronThemes(await realpath(app.getPath("userData")));
   register("markra:theme-list", (_window, directory?: string | null) => themes.list(directory));
   register("markra:theme-read", (_window, name: string, directory?: string | null) => themes.read(name, directory));
@@ -237,6 +242,35 @@ async function start() {
   register("markra:store-set", (_window, ...args: Parameters<typeof stores.set>) => stores.set(...args));
   register("markra:store-delete", (_window, ...args: Parameters<typeof stores.delete>) => stores.delete(...args));
   register("markra:store-save", (_window, ...args: Parameters<typeof stores.save>) => stores.save(...args));
+  register("markra:ai-config", async (window) => {
+    const config = await ai.getConfig();
+    return windows.get(window.webContents.id)?.settings ? config : { ...config, apiKey: "" };
+  });
+  register("markra:ai-config-save", async (window, config: unknown) => {
+    if (!windows.get(window.webContents.id)?.settings) throw new Error("只能从设置窗口修改内网 AI 配置。");
+    const saved = await ai.saveConfig(config);
+    for (const state of windows.values()) emit(state.window, "markra://intranet-ai-config-changed");
+    return saved;
+  });
+  register("markra:ai-chat", async (window, id: number, input: NativeAiChatRequest, stream: boolean) => {
+    const { aiRequests } = windows.get(window.webContents.id)!;
+    if (!Number.isSafeInteger(id) || id < 1 || aiRequests.has(id) || typeof stream !== "boolean") {
+      throw new Error("内网 AI 请求编号或类型无效。");
+    }
+    const controller = new AbortController();
+    aiRequests.set(id, controller);
+    try {
+      return await ai.request(input, controller.signal, stream ? (chunk) => emit(window, `markra:ai-chunk-${id}`, chunk) : undefined);
+    } catch (error) {
+      if (controller.signal.aborted) return { status: 499 };
+      throw error;
+    } finally {
+      if (aiRequests.get(id) === controller) aiRequests.delete(id);
+    }
+  });
+  register("markra:ai-stop", (window, id: number) => {
+    windows.get(window.webContents.id)?.aiRequests.get(id)?.abort();
+  });
   register("markra:confirm-discard", async (window, name: string, labels: Parameters<ElectronBridge["confirmDiscard"]>[1]) => {
     const result = await dialog.showMessageBox(window, {
       type: "warning",

@@ -1,3 +1,4 @@
+import type { ChatCompletionStreamOptions } from "@markra/ai";
 import { getAppRuntime } from "../../runtime";
 
 export type NativeAiHttpRequest = {
@@ -32,7 +33,23 @@ export function requestNativeChat(request: NativeAiChatRequest): Promise<NativeA
 
 export function requestNativeChatStream(
   request: NativeAiChatRequest,
-  onChunk: (chunk: string) => unknown
+  onChunk: (chunk: string) => unknown,
+  signal?: AbortSignal
 ): Promise<NativeAiStreamResponse> {
-  return getAppRuntime().ai.requestChatStream(request, onChunk);
+  return getAppRuntime().ai.requestChatStream(request, onChunk, signal);
+}
+
+export function nativeChatStreamOptions(intranetSignal?: AbortSignal):
+  Pick<ChatCompletionStreamOptions, "fallbackTransport" | "streamTransport" | "useVercelAiSdk"> {
+  if (intranetSignal) return {
+    streamTransport: (request, onChunk) => {
+      intranetSignal.throwIfAborted();
+      return requestNativeChatStream(request, onChunk, intranetSignal);
+    }
+  };
+  return {
+    fallbackTransport: requestNativeChat,
+    streamTransport: requestNativeChatStream,
+    useVercelAiSdk: true
+  };
 }

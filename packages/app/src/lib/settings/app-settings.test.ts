@@ -295,6 +295,20 @@ describe("app settings", () => {
     expect(store.save).toHaveBeenCalledTimes(1);
   });
 
+  it.each(["CSS import", "settings import"])("preserves an explicit dark CSS choice matching the old default after %s", async (source) => {
+    const saved = new Map<string, unknown>();
+    store.get.mockImplementation(async (key: string) => saved.get(key));
+    store.set.mockImplementation(async (key: string, value: unknown) => { saved.set(key, value); });
+    const customThemeCss = { dark: defaultCustomThemeCss, light: "/* custom light */" };
+    if (source === "CSS import") {
+      await saveStoredCustomThemeCss(customThemeCss);
+    } else {
+      const backup = JSON.parse(await exportStoredAppSettings());
+      await importStoredAppSettings(JSON.stringify({ ...backup, settings: { ...backup.settings, customThemeCss } }));
+    }
+    await expect(getStoredCustomThemeCss()).resolves.toEqual(customThemeCss);
+  });
+
   it("loads English as the default app language", async () => {
     store.get.mockResolvedValue("pirate");
 

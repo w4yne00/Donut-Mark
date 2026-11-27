@@ -1,3 +1,4 @@
+import { isThemeCssFileName } from "@markra/shared";
 import { getAppRuntime } from "../../runtime";
 
 export type ThemeFileSelection = { light: string | null; dark: string | null };
@@ -7,7 +8,7 @@ export const emptyThemeFiles: ThemeFileSelection = { light: null, dark: null };
 export const themeFilesChangedEvent = "markra://theme-files-changed";
 
 function normalizeThemeFile(value: unknown): string | null {
-  return typeof value === "string" && /^[^/\\\x00-\x1f:]+\.css$/i.test(value) ? value : null;
+  return isThemeCssFileName(value) ? value : null;
 }
 
 export function normalizeThemeFiles(value: unknown): ThemeFileSelection {

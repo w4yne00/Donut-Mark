@@ -25,3 +25,15 @@ it("imports and exports large supported CSS without altering it", async () => {
   expect(await (create.mock.calls[0][0] as Blob).text()).toBe(css);
   vi.restoreAllMocks();
 });
+
+it.each([
+  new File([new Uint8Array([0xff])], "invalid.css"),
+  new File(["not a stylesheet"], "notes.txt")
+])("preserves the current source when importing an invalid file ($name)", async (file) => {
+  const update = vi.fn();
+  const { container } = render(<CustomThemeCssControl customThemeCss="/* retained */" label="CSS" onUpdateCustomThemeCss={update} translate={translate} />);
+  fireEvent.change(container.querySelector('input[type="file"]')!, { target: { files: [file] } });
+  expect(await screen.findByRole("alert")).toBeVisible();
+  expect(update).not.toHaveBeenCalled();
+  expect(screen.getByRole("textbox")).toHaveValue("/* retained */");
+});

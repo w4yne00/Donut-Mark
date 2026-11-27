@@ -9,6 +9,12 @@ function createBridge() {
   const state = { open: true };
   const bridge: ElectronBridge = {
     files: createDefaultAppRuntime().files,
+    themes: {
+      list: async (directory) => ({ directory: directory ?? "/themes", files: ["light.css"] }),
+      read: async () => ":root { color: black; }",
+      openFolder: async () => undefined,
+      chooseFolder: async () => "/themes"
+    },
     settings: {
       async load(path, options) {
         if (!stores.has(path)) stores.set(path, new Map(Object.entries(options.defaults)));

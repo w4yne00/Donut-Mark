@@ -1,5 +1,6 @@
 import type {
   AppFileRuntime,
+  AppThemesRuntime,
   NativeEditorWindowRestoreState,
   NativeSettingsWindowTarget,
   RuntimeStoreLoadOptions,
@@ -33,6 +34,7 @@ export type WindowAction = "close" | "destroy" | "minimize" | "maximize" | "full
 
 export type ElectronBridge = {
   files: ElectronFiles;
+  themes: AppThemesRuntime;
   settings: ElectronSettings;
   confirmDiscard: AppFileRuntime["confirmUnsavedMarkdownDocumentDiscard"];
   takeOpenedPaths: () => Promise<string[]>;

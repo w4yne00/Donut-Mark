@@ -64,7 +64,7 @@ export function createElectronRuntime(bridge: ElectronBridge): AppRuntime {
       confirmUnsavedMarkdownDocumentDiscard: bridge.confirmDiscard,
       openMarkdownFileInNewWindow: bridge.openEditor,
       openMarkdownFolderInNewWindow: () => unavailable("在新窗口打开文件夹"),
-      openLocalFiles: () => unavailable("导入附件或主题"),
+      openLocalFiles: () => unavailable("导入附件"),
       openLocalImages: () => unavailable("导入图片"),
       openSettingsFile: () => unavailable("导入设置"),
       saveSettingsFile: () => unavailable("导出设置"),
@@ -78,6 +78,7 @@ export function createElectronRuntime(bridge: ElectronBridge): AppRuntime {
         }
       })
     },
+    themes: bridge.themes,
     events: {
       emit: bridge.emit,
       isAvailable: () => true,

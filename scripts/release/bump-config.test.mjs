@@ -4,7 +4,7 @@ import test from "node:test";
 import config, { bumppFilePaths, syncChangelog, updateCargoPackageVersion } from "../../bump.config.mjs";
 
 test("bumpp updates app package manifests directly", () => {
-  assert.deepEqual(bumppFilePaths, ["package.json", "apps/desktop/package.json", "apps/web/package.json"]);
+  assert.deepEqual(bumppFilePaths, ["package.json", "apps/desktop/package.json", "apps/web/package.json", "apps/electron/package.json"]);
   assert.deepEqual(config.files, bumppFilePaths);
   assert.equal(bumppFilePaths.includes("apps/desktop/src-tauri/Cargo.toml"), false);
 });

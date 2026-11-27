@@ -18,6 +18,7 @@ This document only defines engineering conventions for this repository.
 ## Tech Stack
 
 - Desktop shell: Tauri v2.
+- The Kylin V10 SP1 2403 ARM64 shell lives in `apps/electron` and uses Electron with the same `AppRuntime`. Keep its preload API restricted, preserve sandboxing and context isolation, and package only ARM64 `.deb` files.
 - Frontend: React, TypeScript, CodeMirror 6, and Tailwind CSS.
 - Icons: prefer `lucide-react`.
 - Styling should use Tailwind CSS as much as practical. Global CSS should be reserved for design tokens, base styles, CodeMirror/Markdown generated content, and platform-level polish.

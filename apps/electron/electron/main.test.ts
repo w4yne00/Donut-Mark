@@ -1,14 +1,27 @@
 import { mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { app, BrowserWindow } from "electron";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const shell = vi.hoisted(() => ({
   userDataPath: "",
   selectedFile: null as string | null,
+  openFolder: vi.fn<(opener: string, directory: string) => unknown>(),
   handlers: new Map<string, (...args: unknown[]) => unknown>()
 }));
+
+vi.mock("node:child_process", async (importOriginal) => {
+  const childProcess = await importOriginal<typeof import("node:child_process")>();
+  const open = vi.fn((opener: string, args: string[], options: { cwd: string }, callback: (error: Error | null) => unknown) => {
+    realpath(resolve(options.cwd, args[0])).then((path) => {
+      shell.openFolder(opener, path);
+      callback(null);
+    }, callback);
+  });
+  return { ...childProcess, default: { ...childProcess, execFile: open }, execFile: open };
+});
 
 vi.mock("electron", async () => {
   const { EventEmitter } = await import("node:events");
@@ -145,24 +158,57 @@ describe("Electron main process", () => {
     await expect(invoke(restarted, "markra:theme-read", "light.CSS", selected)).resolves.toBe(css);
   });
 
-  it("keeps opening documents and default themes when theme folder authorization cannot be loaded", async () => {
+  it("opens the selected theme folder in the system file manager", async () => {
+    const selected = join(directory, "local themes");
+    await mkdir(selected);
+    await start();
+    const window = BrowserWindow.getAllWindows()[0];
+    shell.selectedFile = selected;
+    await expect(invoke(window, "markra:theme-choose", { title: "Choose theme folder" })).resolves.toBe(selected);
+    await expect(invoke(window, "markra:theme-open", selected)).resolves.toBeUndefined();
+    expect(execFile).toHaveBeenCalledTimes(1);
+    expect(shell.openFolder).toHaveBeenCalledExactlyOnceWith(
+      process.platform === "darwin" ? "/usr/bin/open" : "/usr/bin/xdg-open", selected
+    );
+  });
+
+  it.each(["{broken", JSON.stringify([false])])("recovers theme access after choosing a folder with a damaged record: %s", async (invalidGrants) => {
     await mkdir(shell.userDataPath);
-    await writeFile(join(shell.userDataPath, "theme-access.json"), "{broken");
+    const grantsPath = join(shell.userDataPath, "theme-access.json");
+    await writeFile(grantsPath, invalidGrants);
+    const folder = join(directory, "themes");
+    await mkdir(folder);
+    const css = ":root { --paper: #111; }";
+    await writeFile(join(folder, "dark.css"), css);
     const path = join(directory, "note.md");
     await writeFile(path, "# Still editable");
     await start();
     const window = BrowserWindow.getAllWindows()[0];
-    await expect(invoke(window, "markra:theme-list", directory)).rejects.toThrow();
+    await expect(invoke(window, "markra:theme-list", folder)).rejects.toThrow();
     await expect(invoke(window, "markra:theme-list")).resolves.toMatchObject({ files: [] });
+    await expect(readFile(grantsPath, "utf8")).resolves.toBe(invalidGrants);
     shell.selectedFile = path;
     await invoke(window, "markra:file-open");
     await expect(invoke(window, "markra:file-read", path)).resolves.toMatchObject({ content: "# Still editable" });
+
+    shell.selectedFile = folder;
+    await expect(invoke(window, "markra:theme-choose", { title: "Choose theme folder" })).resolves.toBe(folder);
+    await expect(invoke(window, "markra:theme-read", "dark.css", folder)).resolves.toBe(css);
+    await expect(invoke(window, "markra:theme-list", directory)).rejects.toThrow();
+
+    window.destroy();
+    app.removeAllListeners();
+    shell.handlers.clear();
+    vi.resetModules();
+    await start();
+    const restarted = BrowserWindow.getAllWindows()[0];
+    await expect(invoke(restarted, "markra:theme-read", "dark.css", folder)).resolves.toBe(css);
   });
 
   it("lists only direct CSS files and rejects invalid, missing or replaced files and folders without writing to them", async () => {
     const selected = join(directory, "themes");
     const elsewhere = join(directory, "elsewhere");
-    await Promise.all([mkdir(selected), mkdir(elsewhere), mkdir(join(selected, "nested.css"), { recursive: true })]);
+    await Promise.all([mkdir(elsewhere), mkdir(join(selected, "nested.css"), { recursive: true })]);
     const valid = join(selected, "dark.css");
     const css = "/* 本地主题 */";
     await Promise.all([

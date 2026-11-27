@@ -1,6 +1,6 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { configureAppRuntime, createDefaultAppRuntime, resetAppRuntimeForTests } from "../runtime";
-import { saveStoredCustomThemeCss, saveStoredThemePreferences } from "../lib/settings/app-settings";
+import { defaultCustomThemeCss, saveStoredCustomThemeCss, saveStoredThemePreferences } from "../lib/settings/app-settings";
 import { saveStoredThemeFiles } from "../lib/settings/theme-files";
 import { useAppTheme } from "./useAppTheme";
 
@@ -34,20 +34,31 @@ it("applies file CSS for each appearance and restores inline CSS when the file i
   expect(css()).toBeUndefined();
 });
 
-it("falls back to the default dark appearance when a dark file is missing and no CSS was imported", async () => {
-  configureAppRuntime({ ...createDefaultAppRuntime(), themes: {
-    chooseFolder: async () => null,
-    list: async () => ({ directory: "/mock/themes", files: [] }),
-    read: async () => { throw new Error("missing"); },
-    openFolder: async () => undefined
-  } });
-  await saveStoredThemePreferences({ appearanceMode: "dark", lightTheme: "light", darkTheme: "dark", customThemeEnabled: true });
-  await saveStoredThemeFiles({ light: null, dark: "missing.css" });
-  const { result } = renderHook(useAppTheme);
-  await waitFor(() => expect(result.current.ready).toBe(true));
-  expect(result.current.themeFiles.failedFiles).toEqual(["missing.css"]);
-  expect(document.getElementById("markra-custom-theme-style")?.textContent).toContain("color-scheme: dark;");
-});
+it.each(["fresh settings", "a light-only import from an older version"])(
+  "falls back to the default dark appearance when a dark file is missing with %s",
+  async (profile) => {
+    const runtime = createDefaultAppRuntime();
+    configureAppRuntime({ ...runtime, themes: {
+      chooseFolder: async () => null,
+      list: async () => ({ directory: "/mock/themes", files: [] }),
+      read: async () => { throw new Error("missing"); },
+      openFolder: async () => undefined
+    } });
+    if (profile !== "fresh settings") {
+      const store = await runtime.settings.loadStore("settings.json", { autoSave: false, defaults: {} });
+      await store.set("lightCustomThemeCss", "/* imported light CSS */");
+      await store.set("darkCustomThemeCss", defaultCustomThemeCss);
+      await store.save();
+    }
+    await saveStoredThemePreferences({ appearanceMode: "dark", lightTheme: "light", darkTheme: "dark", customThemeEnabled: true });
+    await saveStoredThemeFiles({ light: null, dark: "missing.css" });
+    const { result } = renderHook(useAppTheme);
+    await waitFor(() => expect(result.current.ready).toBe(true));
+    expect(result.current.themeFiles.failedFiles).toEqual(["missing.css"]);
+    expect(document.getElementById("markra-custom-theme-style")?.textContent).toContain("color-scheme: dark;");
+    if (profile !== "fresh settings") expect(result.current.lightCustomThemeCss).toBe("/* imported light CSS */");
+  }
+);
 
 it("waits for selected file CSS on first paint and does not truncate large stylesheets", async () => {
   let resolveCss!: (css: string) => unknown;

@@ -204,6 +204,7 @@ const customThemeEnabledKey = "customThemeEnabled";
 const customThemeCssKey = "customThemeCss";
 const lightCustomThemeCssKey = "lightCustomThemeCss";
 const darkCustomThemeCssKey = "darkCustomThemeCss";
+const customThemeCssHasSeparateDefaultsKey = "customThemeCssHasSeparateDefaults";
 const languageKey = "language";
 const logLevelKey = "logLevel";
 const acpAgentSettingsKey = "acpAgentSettings";
@@ -714,13 +715,12 @@ export async function writePortableStoredAppSettings(settings: PortableStoredApp
   await store.set(appearanceModeKey, settings.appearanceMode);
   await store.set(backupSettingsKey, settings.backupSettings);
   await store.set(customThemeEnabledKey, settings.customThemeEnabled === true);
-  await store.set(darkCustomThemeCssKey, settings.customThemeCss.dark);
+  await writeCustomThemeCss(store, settings.customThemeCss);
   await store.set(darkThemeKey, settings.darkTheme);
   await store.set(editorPreferencesKey, settings.editorPreferences);
   await store.set(exportSettingsKey, settings.exportSettings);
   await store.set(fileIgnoreSettingsKey, settings.fileIgnoreSettings);
   await store.set(languageKey, settings.language);
-  await store.set(lightCustomThemeCssKey, settings.customThemeCss.light);
   await store.set(lightThemeKey, settings.lightTheme);
   await store.set(logLevelKey, normalizeAppLogLevel(settings.logLevel));
   await store.set(networkKey, settings.network);
@@ -956,8 +956,12 @@ export async function saveStoredThemePreferences(preferences: AppThemePreference
 
 async function readCustomThemeCss(store: Awaited<ReturnType<typeof loadSettingsStore>>) {
   const lightCss = await store.get<string>(lightCustomThemeCssKey);
-  const darkCss = await store.get<string>(darkCustomThemeCssKey);
+  let darkCss = await store.get<string>(darkCustomThemeCssKey);
   const legacyCss = await store.get<string>(customThemeCssKey);
+  // Older saves copied the light template into the dark slot even when only light CSS was edited.
+  if (darkCss === defaultCustomThemeCss && (await store.get<boolean>(customThemeCssHasSeparateDefaultsKey)) !== true) {
+    darkCss = defaultCustomThemeCssValues.dark;
+  }
   return normalizeCustomThemeCssValues({
     dark: typeof darkCss === "string" ? darkCss : legacyCss,
     light: typeof lightCss === "string" ? lightCss : legacyCss
@@ -968,12 +972,15 @@ export async function getStoredCustomThemeCss() {
   return readCustomThemeCss(await loadSettingsStore());
 }
 
+async function writeCustomThemeCss(store: Awaited<ReturnType<typeof loadSettingsStore>>, css: CustomThemeCssValues) {
+  await store.set(lightCustomThemeCssKey, css.light);
+  await store.set(darkCustomThemeCssKey, css.dark);
+  await store.set(customThemeCssHasSeparateDefaultsKey, true);
+}
+
 export async function saveStoredCustomThemeCss(css: CustomThemeCssValues) {
   const store = await loadSettingsStore();
-  const normalizedCss = normalizeCustomThemeCssValues(css);
-
-  await store.set(lightCustomThemeCssKey, normalizedCss.light);
-  await store.set(darkCustomThemeCssKey, normalizedCss.dark);
+  await writeCustomThemeCss(store, normalizeCustomThemeCssValues(css));
   await store.save();
 }
 

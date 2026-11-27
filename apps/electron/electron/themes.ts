@@ -22,9 +22,16 @@ async function readGrants(path: string) {
     const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
     try {
       if (!(await file.stat()).isFile()) throw new Error("主题授权记录不是普通文件。");
-      const data: unknown = JSON.parse(await file.readFile("utf8"));
+      const contents = await file.readFile("utf8");
+      let data: unknown;
+      try {
+        data = JSON.parse(contents);
+      } catch (error) {
+        if (error instanceof SyntaxError) return null;
+        throw error;
+      }
       if (!Array.isArray(data) || data.some((entry) => typeof entry !== "string" || !isAbsolute(entry) || entry.includes("\0"))) {
-        throw new Error("主题文件夹授权记录损坏。");
+        return null;
       }
       return new Set<string>(data);
     } finally {
@@ -39,7 +46,7 @@ async function readGrants(path: string) {
 export function createElectronThemes(userData: string) {
   const defaultDirectory = join(userData, "themes");
   const grantsPath = join(userData, "theme-access.json");
-  let grants: Promise<Set<string>> | undefined;
+  let grants: ReturnType<typeof readGrants> | undefined;
   let writes = Promise.resolve();
   const getGrants = () => grants ??= readGrants(grantsPath);
 
@@ -49,7 +56,11 @@ export function createElectronThemes(userData: string) {
   ) {
     const root = directory ?? defaultDirectory;
     if (root === defaultDirectory) await mkdir(root, { mode: 0o700, recursive: true });
-    else if (!(await getGrants()).has(root)) throw new Error("主题文件夹尚未通过选择对话框授权。");
+    else {
+      const authorized = await getGrants();
+      if (!authorized) throw new Error("主题文件夹授权记录损坏，请重新选择文件夹。");
+      if (!authorized.has(root)) throw new Error("主题文件夹尚未通过选择对话框授权。");
+    }
 
     return useDirectory(root, (openedPath) => action(root, openedPath));
   }
@@ -60,9 +71,11 @@ export function createElectronThemes(userData: string) {
       await useDirectory(root, async () => undefined);
       const save = async () => {
         const authorized = await getGrants();
-        if (authorized.has(root)) return;
-        await atomicWrite(grantsPath, JSON.stringify([...authorized, root]), 0o600);
-        authorized.add(root);
+        if (authorized?.has(root)) return;
+        // A damaged record never grants access; a fresh picker confirmation can replace it.
+        const updated = [...(authorized ?? []), root];
+        await atomicWrite(grantsPath, JSON.stringify(updated), 0o600);
+        grants = Promise.resolve(new Set(updated));
       };
       writes = writes.then(save, save);
       await writes;

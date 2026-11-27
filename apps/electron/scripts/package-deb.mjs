@@ -149,7 +149,7 @@ Categories=Office;TextEditor;
 MimeType=text/markdown;text/x-markdown;
 StartupWMClass=donut-mark
 `);
-  for (const size of [24, 32, 64, 128, 256, 512]) {
+  for (const size of [16, 24, 32, 48, 64, 128, 256, 512, 1024]) {
     const iconDirectory = join(iconRoot, `${size}x${size}/apps`);
     await mkdir(iconDirectory, { recursive: true });
     await cp(join(installedApp, `dist/icons/donut-mark-${size}.png`), join(iconDirectory, "donut-mark.png"));

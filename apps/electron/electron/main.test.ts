@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { app, BrowserWindow } from "electron";
@@ -115,6 +115,85 @@ async function invoke(window: BrowserWindow, name: string, ...args: unknown[]) {
 }
 
 describe("Electron main process", () => {
+  it("restores a picked theme directory without granting access to other directories or documents", async () => {
+    const selected = join(directory, "themes");
+    const other = join(directory, "other");
+    await Promise.all([mkdir(selected), mkdir(other)]);
+    const css = ":root { --paper: #fff; }";
+    await Promise.all([
+      writeFile(join(selected, "light.CSS"), css),
+      writeFile(join(selected, "notes.md"), "private notes"),
+      writeFile(join(other, "light.CSS"), "private CSS")
+    ]);
+    await start();
+    const first = BrowserWindow.getAllWindows()[0];
+    await expect(invoke(first, "markra:theme-list", selected)).rejects.toThrow();
+    await expect(invoke(first, "markra:theme-choose", { title: "Choose theme folder" })).resolves.toBeNull();
+    shell.selectedFile = selected;
+    await expect(invoke(first, "markra:theme-choose", { title: "Choose theme folder" })).resolves.toBe(selected);
+    await expect(invoke(first, "markra:theme-list", selected)).resolves.toEqual({ directory: selected, files: ["light.CSS"] });
+    await expect(invoke(first, "markra:theme-read", "light.CSS", other)).rejects.toThrow();
+    await expect(invoke(first, "markra:theme-open", other)).rejects.toThrow();
+    await expect(invoke(first, "markra:file-read", join(selected, "notes.md"))).rejects.toThrow();
+
+    first.destroy();
+    app.removeAllListeners();
+    shell.handlers.clear();
+    vi.resetModules();
+    await start();
+    const restarted = BrowserWindow.getAllWindows()[0];
+    await expect(invoke(restarted, "markra:theme-read", "light.CSS", selected)).resolves.toBe(css);
+  });
+
+  it("keeps opening documents and default themes when theme folder authorization cannot be loaded", async () => {
+    await mkdir(shell.userDataPath);
+    await writeFile(join(shell.userDataPath, "theme-access.json"), "{broken");
+    const path = join(directory, "note.md");
+    await writeFile(path, "# Still editable");
+    await start();
+    const window = BrowserWindow.getAllWindows()[0];
+    await expect(invoke(window, "markra:theme-list", directory)).rejects.toThrow();
+    await expect(invoke(window, "markra:theme-list")).resolves.toMatchObject({ files: [] });
+    shell.selectedFile = path;
+    await invoke(window, "markra:file-open");
+    await expect(invoke(window, "markra:file-read", path)).resolves.toMatchObject({ content: "# Still editable" });
+  });
+
+  it("lists only direct CSS files and rejects invalid, missing or replaced files and folders without writing to them", async () => {
+    const selected = join(directory, "themes");
+    const elsewhere = join(directory, "elsewhere");
+    await Promise.all([mkdir(selected), mkdir(elsewhere), mkdir(join(selected, "nested.css"), { recursive: true })]);
+    const valid = join(selected, "dark.css");
+    const css = "/* 本地主题 */";
+    await Promise.all([
+      writeFile(valid, css),
+      writeFile(join(selected, "invalid.css"), new Uint8Array([0xff])),
+      writeFile(join(selected, "large.css"), Buffer.alloc(1024 * 1024 + 1)),
+      writeFile(join(selected, "nested.css", "child.css"), css),
+      writeFile(join(elsewhere, "dark.css"), "outside the selected folder"),
+      symlink(join(elsewhere, "dark.css"), join(selected, "link.css"))
+    ]);
+    await start();
+    const window = BrowserWindow.getAllWindows()[0];
+    const defaults = await invoke(window, "markra:theme-list");
+    expect(defaults).toEqual({ directory: join(shell.userDataPath, "themes"), files: [] });
+    shell.selectedFile = selected;
+    await invoke(window, "markra:theme-choose", { title: "Choose theme folder" });
+    await expect(invoke(window, "markra:theme-list", selected)).resolves.toEqual({
+      directory: selected, files: ["dark.css", "invalid.css", "large.css"]
+    });
+    for (const name of ["../elsewhere/dark.css", "invalid.css", "large.css", "link.css", "nested.css", "missing.css"]) {
+      await expect(invoke(window, "markra:theme-read", name, selected)).rejects.toThrow();
+    }
+    await expect(invoke(window, "markra:theme-read", "dark.css", selected)).resolves.toBe(css);
+    await expect(readFile(valid, "utf8")).resolves.toBe(css);
+
+    await rm(selected, { recursive: true });
+    await symlink(elsewhere, selected);
+    await expect(invoke(window, "markra:theme-list", selected)).rejects.toThrow();
+    await expect(invoke(window, "markra:theme-read", "dark.css", selected)).rejects.toThrow();
+  });
+
   it("opens a second instance's relative file from that instance's working directory", async () => {
     const firstDirectory = join(directory, "first");
     const secondDirectory = join(directory, "second");

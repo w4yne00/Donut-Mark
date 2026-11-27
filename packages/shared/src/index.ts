@@ -14,4 +14,5 @@ export * from "./runtime.ts";
 export * from "./search.ts";
 export * from "./string.ts";
 export * from "./text.ts";
+export * from "./theme-css.ts";
 export * from "./url.ts";

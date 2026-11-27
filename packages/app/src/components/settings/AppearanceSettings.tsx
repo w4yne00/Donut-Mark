@@ -126,6 +126,7 @@ function CustomThemeCssPanel({
           {translate("settings.theme.editFileHint")}
         </p>
       ) : <CustomThemeCssControl
+        appearance={appearance}
         customThemeCss={customThemeCss}
         label={title}
         translate={translate}

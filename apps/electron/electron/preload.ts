@@ -38,6 +38,12 @@ const bridge: ElectronBridge = {
     }),
     watchMarkdownTree: (path, onTreeChange) => watchPath("tree", path, (event) => onTreeChange(event.path))
   },
+  themes: {
+    list: (directory) => ipcRenderer.invoke("markra:theme-list", directory),
+    read: (name, directory) => ipcRenderer.invoke("markra:theme-read", name, directory),
+    openFolder: (directory) => ipcRenderer.invoke("markra:theme-open", directory),
+    chooseFolder: (options) => ipcRenderer.invoke("markra:theme-choose", options)
+  },
   settings: {
     load: (path, options) => ipcRenderer.invoke("markra:store-load", path, options),
     get: (path, key) => ipcRenderer.invoke("markra:store-get", path, key),

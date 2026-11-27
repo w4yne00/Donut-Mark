@@ -1,4 +1,5 @@
 import defaultCustomThemeCss from "../../themes/light.css?raw";
+import defaultDarkCustomThemeCss from "../../themes/dark.css?raw";
 import {
   createAiAgentSessionTitle,
   createDefaultAiAgentSessionState,
@@ -12,7 +13,7 @@ import {
 } from "@markra/ai";
 import { defaultMarkdownShortcuts, normalizeMarkdownShortcuts, type MarkdownShortcutBindings } from "@markra/editor";
 import { createDefaultAiSettings, normalizeAiSettings, type AiProviderSettings } from "@markra/providers";
-import { clampNumber, isAppLanguage, normalizeNullableString, type AppLanguage } from "@markra/shared";
+import { clampNumber, isAppLanguage, maxThemeCssBytes, normalizeNullableString, type AppLanguage } from "@markra/shared";
 import {
   editorContentWidthOptions,
   normalizeEditorContentWidthPx,
@@ -445,7 +446,7 @@ export type { AppLogLevel };
 export type { EditorContentWidth };
 export type { EditorFontFamilyPreference };
 
-export const customThemeCssMaxBytes = 1024 * 1024;
+export const customThemeCssMaxBytes = maxThemeCssBytes;
 // This many code units can preserve any supported UTF-8 import without truncating its source.
 export const customThemeCssMaxLength = customThemeCssMaxBytes;
 export { defaultCustomThemeCss };
@@ -454,7 +455,7 @@ export type CustomThemeCssValues = {
   light: string;
 };
 export const defaultCustomThemeCssValues: CustomThemeCssValues = {
-  dark: defaultCustomThemeCss,
+  dark: defaultDarkCustomThemeCss,
   light: defaultCustomThemeCss
 };
 
@@ -668,11 +669,7 @@ export async function readPortableStoredAppSettings(): Promise<PortableStoredApp
     lightTheme: await store.get<LightEditorTheme>(lightThemeKey),
     uiZoomPercent: await store.get<number>(uiZoomPercentKey)
   }, legacyPreferences);
-  const legacyCustomThemeCss = normalizeCustomThemeCss(await store.get<string>(customThemeCssKey));
-  const customThemeCss = normalizeCustomThemeCssValues({
-    dark: await store.get<string>(darkCustomThemeCssKey) ?? legacyCustomThemeCss,
-    light: await store.get<string>(lightCustomThemeCssKey) ?? legacyCustomThemeCss
-  });
+  const customThemeCss = await readCustomThemeCss(store);
   const language = await store.get<AppLanguage>(languageKey);
   const logLevel = await store.get<AppLogLevel>(logLevelKey);
   const acpAgentSettings = await store.get<Partial<AcpAgentSettings>>(acpAgentSettingsKey);
@@ -778,14 +775,14 @@ export function isDarkEditorTheme(value: unknown): value is DarkEditorTheme {
   return darkEditorThemeOptions.includes(value as DarkEditorTheme);
 }
 
-export function normalizeCustomThemeCss(value: unknown) {
-  if (typeof value !== "string") return defaultCustomThemeCss;
+export function normalizeCustomThemeCss(value: unknown, appearance: keyof CustomThemeCssValues = "light") {
+  if (typeof value !== "string") return defaultCustomThemeCssValues[appearance];
 
   return value.slice(0, customThemeCssMaxLength);
 }
 
 export function normalizeCustomThemeCssValues(value: unknown): CustomThemeCssValues {
-  if (typeof value !== "object" || value === null) {
+  if (typeof value === "string") {
     const css = normalizeCustomThemeCss(value);
 
     return {
@@ -794,11 +791,11 @@ export function normalizeCustomThemeCssValues(value: unknown): CustomThemeCssVal
     };
   }
 
-  const css = value as Partial<Record<keyof CustomThemeCssValues, unknown>>;
+  const css = value as Partial<Record<keyof CustomThemeCssValues, unknown>> | null | undefined;
 
   return {
-    dark: normalizeCustomThemeCss(css.dark),
-    light: normalizeCustomThemeCss(css.light)
+    dark: normalizeCustomThemeCss(css?.dark, "dark"),
+    light: normalizeCustomThemeCss(css?.light)
   };
 }
 
@@ -957,17 +954,18 @@ export async function saveStoredThemePreferences(preferences: AppThemePreference
   await store.save();
 }
 
-export async function getStoredCustomThemeCss() {
-  const store = await loadSettingsStore();
+async function readCustomThemeCss(store: Awaited<ReturnType<typeof loadSettingsStore>>) {
   const lightCss = await store.get<string>(lightCustomThemeCssKey);
   const darkCss = await store.get<string>(darkCustomThemeCssKey);
   const legacyCss = await store.get<string>(customThemeCssKey);
-  const fallbackCss = normalizeCustomThemeCss(legacyCss);
+  return normalizeCustomThemeCssValues({
+    dark: typeof darkCss === "string" ? darkCss : legacyCss,
+    light: typeof lightCss === "string" ? lightCss : legacyCss
+  });
+}
 
-  return {
-    dark: typeof darkCss === "string" ? normalizeCustomThemeCss(darkCss) : fallbackCss,
-    light: typeof lightCss === "string" ? normalizeCustomThemeCss(lightCss) : fallbackCss
-  };
+export async function getStoredCustomThemeCss() {
+  return readCustomThemeCss(await loadSettingsStore());
 }
 
 export async function saveStoredCustomThemeCss(css: CustomThemeCssValues) {

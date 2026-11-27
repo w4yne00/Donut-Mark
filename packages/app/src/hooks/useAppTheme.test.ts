@@ -34,6 +34,21 @@ it("applies file CSS for each appearance and restores inline CSS when the file i
   expect(css()).toBeUndefined();
 });
 
+it("falls back to the default dark appearance when a dark file is missing and no CSS was imported", async () => {
+  configureAppRuntime({ ...createDefaultAppRuntime(), themes: {
+    chooseFolder: async () => null,
+    list: async () => ({ directory: "/mock/themes", files: [] }),
+    read: async () => { throw new Error("missing"); },
+    openFolder: async () => undefined
+  } });
+  await saveStoredThemePreferences({ appearanceMode: "dark", lightTheme: "light", darkTheme: "dark", customThemeEnabled: true });
+  await saveStoredThemeFiles({ light: null, dark: "missing.css" });
+  const { result } = renderHook(useAppTheme);
+  await waitFor(() => expect(result.current.ready).toBe(true));
+  expect(result.current.themeFiles.failedFiles).toEqual(["missing.css"]);
+  expect(document.getElementById("markra-custom-theme-style")?.textContent).toContain("color-scheme: dark;");
+});
+
 it("waits for selected file CSS on first paint and does not truncate large stylesheets", async () => {
   let resolveCss!: (css: string) => unknown;
   configureAppRuntime({ ...createDefaultAppRuntime(), themes: {

@@ -6,6 +6,7 @@ import type { NativeEditorWindowRestoreState, NativeSettingsWindowTarget, SetNat
 import { settingsEvents, type ElectronBridge } from "./bridge";
 import { createElectronFiles } from "./files";
 import { createElectronSettings } from "./settings";
+import { createElectronThemes } from "./themes";
 
 const appUrl = "markra://app/index.html";
 const bundleDirectory = dirname(fileURLToPath(import.meta.url));
@@ -180,6 +181,19 @@ async function start() {
   });
   const files = fileService.files;
   const stores = createElectronSettings(app.getPath("userData"));
+  const themes = createElectronThemes(await realpath(app.getPath("userData")));
+  register("markra:theme-list", (_window, directory?: string | null) => themes.list(directory));
+  register("markra:theme-read", (_window, name: string, directory?: string | null) => themes.read(name, directory));
+  register("markra:theme-open", (_window, directory?: string | null) => themes.openFolder(directory));
+  register("markra:theme-choose", async (window, options: Parameters<ElectronBridge["themes"]["chooseFolder"]>[0]) => {
+    const result = await dialog.showOpenDialog(window, {
+      title: typeof options?.title === "string" ? options.title : "选择主题文件夹",
+      defaultPath: typeof options?.defaultPath === "string" ? options.defaultPath : undefined,
+      properties: ["openDirectory"]
+    });
+    const path = result.canceled ? undefined : result.filePaths[0];
+    return path ? themes.authorizeDirectory(path) : null;
+  });
   register("markra:file-open", (_window, ...args: Parameters<typeof files.openMarkdownFile>) => files.openMarkdownFile(...args));
   register("markra:path-open", (_window, ...args: Parameters<typeof files.openMarkdownPath>) => files.openMarkdownPath(...args));
   register("markra:folder-open", (_window, ...args: Parameters<typeof files.openMarkdownFolder>) => files.openMarkdownFolder(...args));

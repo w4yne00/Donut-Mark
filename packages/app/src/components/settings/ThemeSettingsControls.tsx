@@ -1,11 +1,11 @@
 import { Code2, Download, RotateCcw, Upload } from "lucide-react";
 import { type ChangeEvent, type CSSProperties, useRef, useState } from "react";
 import {
-  defaultCustomThemeCss,
+  defaultCustomThemeCssValues,
   customThemeCssMaxBytes,
   type EditorTheme
 } from "../../lib/settings/app-settings";
-import type { I18nKey } from "@markra/shared";
+import { isThemeCssFileName, type I18nKey } from "@markra/shared";
 import { mergeClassNames } from "./class-names";
 import { SettingsButton, SettingsTextarea } from "./SettingsControls";
 import { Tooltip } from "@markra/ui";
@@ -321,8 +321,8 @@ export function ThemePreviewGrid<Theme extends EditorTheme>({
   );
 }
 
-function exportCustomThemeCss(css: string) {
-  const exportCss = css.trim().length > 0 ? css : defaultCustomThemeCss;
+function exportCustomThemeCss(css: string, defaultCss: string) {
+  const exportCss = css.trim().length > 0 ? css : defaultCss;
   const objectUrl = URL.createObjectURL(new Blob([exportCss], { type: "text/css;charset=utf-8" }));
   const link = document.createElement("a");
 
@@ -337,11 +337,13 @@ function exportCustomThemeCss(css: string) {
 }
 
 export function CustomThemeCssControl({
+  appearance = "light",
   customThemeCss,
   label,
   onUpdateCustomThemeCss,
   translate
 }: {
+  appearance?: "light" | "dark";
   customThemeCss: string;
   label: string;
   onUpdateCustomThemeCss: (css: string) => unknown;
@@ -352,6 +354,7 @@ export function CustomThemeCssControl({
   const importLabel = translate("settings.theme.importCustomCss");
   const exportLabel = translate("settings.theme.exportCustomCss");
   const resetLabel = translate("settings.theme.resetCustomCss");
+  const defaultCss = defaultCustomThemeCssValues[appearance];
 
   function handleImportFile(event: ChangeEvent<HTMLInputElement>) {
     const input = event.currentTarget;
@@ -360,13 +363,17 @@ export function CustomThemeCssControl({
     input.value = "";
     if (!file) return;
     setImportError(null);
+    if (!isThemeCssFileName(file.name)) {
+      setImportError("settings.theme.cssFileReadError");
+      return;
+    }
     if (file.size > customThemeCssMaxBytes) {
       setImportError("settings.theme.cssFileTooLarge");
       return;
     }
 
-    file.text()
-      .then((css) => onUpdateCustomThemeCss(css))
+    file.arrayBuffer()
+      .then((bytes) => onUpdateCustomThemeCss(new TextDecoder("utf-8", { fatal: true }).decode(bytes)))
       .catch(() => setImportError("settings.theme.cssFileReadError"));
   }
 
@@ -385,11 +392,11 @@ export function CustomThemeCssControl({
           <Upload aria-hidden="true" size={13} />
           {importLabel}
         </SettingsButton>
-        <SettingsButton label={exportLabel} onClick={() => exportCustomThemeCss(customThemeCss)}>
+        <SettingsButton label={exportLabel} onClick={() => exportCustomThemeCss(customThemeCss, defaultCss)}>
           <Download aria-hidden="true" size={13} />
           {exportLabel}
         </SettingsButton>
-        <SettingsButton label={resetLabel} onClick={() => onUpdateCustomThemeCss(defaultCustomThemeCss)}>
+        <SettingsButton label={resetLabel} onClick={() => onUpdateCustomThemeCss(defaultCss)}>
           <RotateCcw aria-hidden="true" size={13} />
           {resetLabel}
         </SettingsButton>

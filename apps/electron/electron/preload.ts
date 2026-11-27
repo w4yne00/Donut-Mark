@@ -1,5 +1,26 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { ElectronBridge } from "./bridge";
+import type { ElectronBridge, ElectronFileWatchEvent } from "./bridge";
+
+let nextWatchId = 0;
+
+async function watchPath(kind: "file" | "tree", path: string, onChange: (event: ElectronFileWatchEvent) => unknown) {
+  const id = ++nextWatchId;
+  const eventName = `markra:watch-${id}`;
+  const listener = (_event: Electron.IpcRendererEvent, name: string, payload: ElectronFileWatchEvent) => {
+    if (name === eventName) onChange(payload);
+  };
+  ipcRenderer.on("markra:event", listener);
+  try {
+    await ipcRenderer.invoke("markra:watch-start", id, kind, path);
+  } catch (error) {
+    ipcRenderer.removeListener("markra:event", listener);
+    throw error;
+  }
+  return () => {
+    ipcRenderer.removeListener("markra:event", listener);
+    return ipcRenderer.invoke("markra:watch-stop", id).catch(console.error);
+  };
+}
 
 const bridge: ElectronBridge = {
   files: {
@@ -10,7 +31,12 @@ const bridge: ElectronBridge = {
     saveMarkdownFile: (input) => ipcRenderer.invoke("markra:file-save", input),
     resolveMarkdownPath: (path) => ipcRenderer.invoke("markra:path-resolve", path),
     listMarkdownFilesForPath: (path, options) => ipcRenderer.invoke("markra:files-list", path, options),
-    readMarkdownImageFile: (input) => ipcRenderer.invoke("markra:image-read", input)
+    readMarkdownImageFile: (input) => ipcRenderer.invoke("markra:image-read", input),
+    watchMarkdownFile: (path, onChange, onTreeChange) => watchPath("file", path, (event) => {
+      if (event.kind === "file") onChange(event.path);
+      else onTreeChange?.(event.path);
+    }),
+    watchMarkdownTree: (path, onTreeChange) => watchPath("tree", path, (event) => onTreeChange(event.path))
   },
   settings: {
     load: (path, options) => ipcRenderer.invoke("markra:store-load", path, options),

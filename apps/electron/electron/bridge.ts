@@ -15,7 +15,11 @@ export type ElectronFiles = Pick<AppFileRuntime,
   | "resolveMarkdownPath"
   | "listMarkdownFilesForPath"
   | "readMarkdownImageFile"
+  | "watchMarkdownFile"
+  | "watchMarkdownTree"
 >;
+
+export type ElectronFileWatchEvent = { kind: "file" | "tree"; path: string };
 
 export type ElectronSettings = {
   load: (path: string, options: RuntimeStoreLoadOptions) => Promise<unknown>;

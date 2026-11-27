@@ -1,8 +1,8 @@
 import { constants } from "node:fs";
-import { randomUUID } from "node:crypto";
-import { mkdir, open, realpath, rename, rm } from "node:fs/promises";
+import { mkdir, open, realpath } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import type { ElectronSettings } from "./bridge";
+import { atomicWrite } from "./atomic-write";
 
 type Store = {
   autoSave: boolean;
@@ -75,19 +75,7 @@ export function createElectronSettings(userDataPath: string): ElectronSettings {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
-    const temporaryPath = join(dirname(path), `.settings-${randomUUID()}.tmp`);
-    const file = await open(temporaryPath, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600);
-    try {
-      try {
-        await file.writeFile(contents, "utf8");
-        await file.sync();
-      } finally {
-        await file.close();
-      }
-      await rename(temporaryPath, path);
-    } finally {
-      await rm(temporaryPath, { force: true });
-    }
+    await atomicWrite(path, contents, 0o600);
   }
 
   async function save(path: string) {

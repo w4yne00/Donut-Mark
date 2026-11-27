@@ -1,12 +1,13 @@
-import { constants } from "node:fs";
-import { lstat, mkdir, open, readFile, readdir, rename, rm } from "node:fs/promises";
-import { randomUUID } from "node:crypto";
+import { constants, watch } from "node:fs";
+import { lstat, mkdir, open, readFile, readdir } from "node:fs/promises";
 import { basename, dirname, extname, isAbsolute, join, parse, relative, resolve, sep } from "node:path";
 import type { NativeMarkdownFolderFile, NativeMarkdownPickerLabels, SaveNativeMarkdownFileInput } from "@markra/app/runtime";
 import type { ElectronFiles } from "./bridge";
+import { atomicWrite } from "./atomic-write";
 
 type FileRuntimeOptions = {
   userDataPath: string;
+  onWatchError?: (error: unknown) => unknown;
   chooseFile: (labels?: NativeMarkdownPickerLabels) => Promise<string | null>;
   chooseFolder: (labels?: NativeMarkdownPickerLabels) => Promise<string | null>;
   chooseSavePath: (input: SaveNativeMarkdownFileInput) => Promise<string | null>;
@@ -35,33 +36,12 @@ async function rejectSymlinks(path: string, allowMissingFile = false) {
     current = join(current, segments[index]);
     try {
       const stat = await lstat(current);
-      if (stat.isSymbolicLink()) throw new Error("不允许通过符号链接访问文件。");
-      if (index < segments.length - 1 && !stat.isDirectory()) throw new Error("文件路径包含非目录项。");
+      if (stat.isSymbolicLink()) throw Object.assign(new Error("不允许通过符号链接访问文件。"), { code: "ELOOP" });
+      if (index < segments.length - 1 && !stat.isDirectory()) throw Object.assign(new Error("文件路径包含非目录项。"), { code: "ENOTDIR" });
     } catch (error) {
       if (allowMissingFile && index === segments.length - 1 && (error as NodeJS.ErrnoException).code === "ENOENT") return;
       throw error;
     }
-  }
-}
-
-async function atomicWrite(path: string, contents: string, mode: number) {
-  const temporaryPath = join(dirname(path), `.${basename(path)}-${randomUUID()}.tmp`);
-  const file = await open(temporaryPath, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, mode);
-  try {
-    await file.chmod(mode);
-    await file.writeFile(contents, "utf8");
-    await file.sync();
-  } catch (error) {
-    await file.close();
-    await rm(temporaryPath, { force: true });
-    throw error;
-  }
-  await file.close();
-  try {
-    await rejectSymlinks(path, true);
-    await rename(temporaryPath, path);
-  } finally {
-    await rm(temporaryPath, { force: true });
   }
 }
 
@@ -89,7 +69,7 @@ export async function createElectronFiles(options: FileRuntimeOptions) {
     const write = () => atomicWrite(grantsPath, JSON.stringify({
       files: [...grantedFiles],
       directories: [...grantedDirectories]
-    }), 0o600);
+    }), 0o600, () => rejectSymlinks(grantsPath, true));
     grantSave = grantSave.then(write, write);
     await grantSave;
   }
@@ -114,7 +94,58 @@ export async function createElectronFiles(options: FileRuntimeOptions) {
     return path;
   }
 
+  async function treeRoot(value: string) {
+    const path = absolutePath(value);
+    const containsGrantedFile = [...grantedFiles].some((filePath) => dirname(filePath) === path);
+    if (!grantedFiles.has(path) && !directoryAuthorized(path) && !containsGrantedFile) {
+      throw new Error("文件夹尚未通过打开对话框授权。");
+    }
+    await rejectSymlinks(path);
+    return (await lstat(path)).isDirectory() ? path : dirname(path);
+  }
+
+  function watchDirectory(root: string, onChange: (path: string) => unknown) {
+    let active = true;
+    // Watch the directory so replacing a file atomically does not detach its watch.
+    const watcher = watch(root, { recursive: directoryAuthorized(root) }, (_event, filename) => {
+      const candidates = filename === null
+        ? directoryAuthorized(root) ? [root] : [...grantedFiles].filter((path) => dirname(path) === root)
+        : [resolve(root, filename)];
+      for (const path of candidates) {
+        if (!isWithin(path, root) || (!grantedFiles.has(path) && !directoryAuthorized(path))) continue;
+        rejectSymlinks(path, true).then(() => {
+          if (active) onChange(path);
+        }).catch((error: NodeJS.ErrnoException) => {
+          if (!["ENOENT", "ENOTDIR", "ELOOP"].includes(error.code ?? "")) fail(error);
+        });
+      }
+    });
+    function stop() {
+      active = false;
+      watcher.close();
+    }
+    function fail(error: unknown) {
+      stop();
+      if (options.onWatchError) options.onWatchError(error);
+      else throw error;
+    }
+    watcher.on("error", fail);
+    return stop;
+  }
+
   const files: ElectronFiles = {
+    async watchMarkdownFile(value, onChange, onTreeChange) {
+      const path = await authorizedPath(value, true);
+      if (!isMarkdownPath(path)) throw new Error("只能监听 Markdown 或文本文件。");
+      return watchDirectory(dirname(path), (changedPath) => {
+        if (changedPath === path || changedPath === dirname(path)) onChange(path);
+        onTreeChange?.(dirname(path));
+      });
+    },
+    async watchMarkdownTree(value, onTreeChange) {
+      const root = await treeRoot(value);
+      return watchDirectory(root, () => onTreeChange(root));
+    },
     async readMarkdownFile(value) {
       const path = await authorizedPath(value);
       if (!isMarkdownPath(path)) throw new Error("只能读取 Markdown 或文本文件。");
@@ -155,7 +186,7 @@ export async function createElectronFiles(options: FileRuntimeOptions) {
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       }
-      await atomicWrite(path, input.contents, mode);
+      await atomicWrite(path, input.contents, mode, () => rejectSymlinks(path, true));
       return { path, name: basename(path) };
     },
     async resolveMarkdownPath(value) {
@@ -165,14 +196,7 @@ export async function createElectronFiles(options: FileRuntimeOptions) {
       return { kind: "file", path, name: file.name };
     },
     async listMarkdownFilesForPath(value) {
-      const path = absolutePath(value);
-      const containsGrantedFile = [...grantedFiles].some((filePath) => dirname(filePath) === path);
-      if (!grantedFiles.has(path) && !directoryAuthorized(path) && !containsGrantedFile) {
-        throw new Error("文件夹尚未通过打开对话框授权。");
-      }
-      await rejectSymlinks(path);
-      const stat = await lstat(path);
-      const root = stat.isDirectory() ? path : dirname(path);
+      const root = await treeRoot(value);
       if (!directoryAuthorized(root)) {
         const selectedFiles = [...grantedFiles].filter((filePath) => dirname(filePath) === root).sort();
         const entries: NativeMarkdownFolderFile[] = [];

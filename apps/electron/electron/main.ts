@@ -10,7 +10,7 @@ import { createElectronSettings } from "./settings";
 const appUrl = "markra://app/index.html";
 const bundleDirectory = dirname(fileURLToPath(import.meta.url));
 const rendererDirectory = resolve(bundleDirectory, "../dist");
-const windows = new Map<number, { window: BrowserWindow; settings: boolean; restore?: NativeEditorWindowRestoreState }>();
+const windows = new Map<number, { window: BrowserWindow; settings: boolean; watches: Map<number, () => unknown>; restore?: NativeEditorWindowRestoreState }>();
 let fileService: Awaited<ReturnType<typeof createElectronFiles>>;
 let quitting = false;
 let exitRestoreStates: NativeEditorWindowRestoreState[] | null = null;
@@ -76,7 +76,14 @@ function createWindow({ settings = false, path, target, blank = false }: {
     }
   });
   const id = window.webContents.id;
-  windows.set(id, { window, settings });
+  const watches = new Map<number, () => unknown>();
+  const stopWatches = () => {
+    for (const stop of watches.values()) stop();
+    watches.clear();
+  };
+  windows.set(id, { window, settings, watches });
+  window.webContents.on("did-navigate", stopWatches);
+  window.webContents.on("render-process-gone", stopWatches);
   window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   window.webContents.on("will-navigate", (event) => event.preventDefault());
   window.webContents.on("will-attach-webview", (event) => event.preventDefault());
@@ -87,6 +94,7 @@ function createWindow({ settings = false, path, target, blank = false }: {
     }
   });
   window.on("closed", () => {
+    stopWatches();
     windows.delete(id);
     if (![...windows.values()].some((state) => !state.settings)) {
       for (const state of windows.values()) state.window.destroy();
@@ -105,11 +113,11 @@ function createWindow({ settings = false, path, target, blank = false }: {
   return window;
 }
 
-async function openArguments(argv: string[]) {
+async function openArguments(argv: string[], workingDirectory = process.cwd()) {
   const paths: string[] = [];
   for (const argument of argv) {
     if (argument.startsWith("-") || !/\.(?:md|markdown|mdown|mkd|txt)$/i.test(argument)) continue;
-    paths.push(await fileService.authorizeFile(resolve(argument)));
+    paths.push(await fileService.authorizeFile(resolve(workingDirectory, argument)));
   }
   return paths;
 }
@@ -145,6 +153,7 @@ async function start() {
   const markdownFilters = [{ name: "Markdown", extensions: ["md", "markdown", "mdown", "mkd", "txt"] }];
   fileService = await createElectronFiles({
     userDataPath: app.getPath("userData"),
+    onWatchError: reportError,
     chooseFile: async (labels) => {
       const result = await dialog.showOpenDialog(focusedWindow(), {
         title: labels?.title ?? "打开 Markdown 文件",
@@ -179,6 +188,36 @@ async function start() {
   register("markra:path-resolve", (_window, ...args: Parameters<typeof files.resolveMarkdownPath>) => files.resolveMarkdownPath(...args));
   register("markra:files-list", (_window, ...args: Parameters<typeof files.listMarkdownFilesForPath>) => files.listMarkdownFilesForPath(...args));
   register("markra:image-read", (_window, ...args: Parameters<typeof files.readMarkdownImageFile>) => files.readMarkdownImageFile(...args));
+  register("markra:watch-start", async (window, id: number, kind: "file" | "tree", path: string) => {
+    const watches = windows.get(window.webContents.id)!.watches;
+    if (!Number.isSafeInteger(id) || id < 1 || watches.has(id) || (kind !== "file" && kind !== "tree")) {
+      throw new Error("无效的文件监听请求。");
+    }
+    let active = true;
+    let stop: (() => unknown) | undefined;
+    const cleanup = () => {
+      active = false;
+      stop?.();
+    };
+    watches.set(id, cleanup);
+    const notify = (eventKind: "file" | "tree", changedPath: string) => {
+      if (active) emit(window, `markra:watch-${id}`, { kind: eventKind, path: changedPath });
+    };
+    try {
+      stop = kind === "file"
+        ? await files.watchMarkdownFile(path, (changedPath) => notify("file", changedPath), (root) => notify("tree", root))
+        : await files.watchMarkdownTree(path, (root) => notify("tree", root));
+      if (!active) stop();
+    } catch (error) {
+      if (watches.get(id) === cleanup) watches.delete(id);
+      throw error;
+    }
+  });
+  register("markra:watch-stop", (window, id: number) => {
+    const watches = windows.get(window.webContents.id)!.watches;
+    watches.get(id)?.();
+    watches.delete(id);
+  });
   register("markra:store-load", (_window, ...args: Parameters<typeof stores.load>) => stores.load(...args));
   register("markra:store-get", (_window, ...args: Parameters<typeof stores.get>) => stores.get(...args));
   register("markra:store-set", (_window, ...args: Parameters<typeof stores.set>) => stores.set(...args));
@@ -246,8 +285,8 @@ async function start() {
     if (!settingsEvents.has(name)) throw new Error("不允许广播此事件。");
     for (const state of windows.values()) emit(state.window, name, payload);
   });
-  app.on("second-instance", (_event, argv) => {
-    openArguments(argv.slice(1)).then((paths) => {
+  app.on("second-instance", (_event, argv, workingDirectory) => {
+    openArguments(argv.slice(1), workingDirectory).then((paths) => {
       if (paths.length === 0) createWindow({ blank: true });
       else paths.forEach((path) => createWindow({ path }));
     }).catch(reportError);

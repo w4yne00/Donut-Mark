@@ -132,9 +132,9 @@ try {
 
   const binDirectory = join(dataRoot, "usr/bin");
   const desktopDirectory = join(dataRoot, "usr/share/applications");
-  const iconDirectory = join(dataRoot, "usr/share/icons/hicolor/256x256/apps");
+  const iconRoot = join(dataRoot, "usr/share/icons/hicolor");
   const documentationDirectory = join(dataRoot, "usr/share/doc/donut-mark");
-  for (const directory of [binDirectory, desktopDirectory, iconDirectory, documentationDirectory]) {
+  for (const directory of [binDirectory, desktopDirectory, documentationDirectory]) {
     await mkdir(directory, { recursive: true });
   }
   await writeFile(join(binDirectory, "donut-mark"), '#!/bin/sh\nexec /opt/donut-mark/electron /opt/donut-mark/app --class=donut-mark "$@"\n', { mode: 0o755 });
@@ -149,8 +149,14 @@ Categories=Office;TextEditor;
 MimeType=text/markdown;text/x-markdown;
 StartupWMClass=donut-mark
 `);
-  await cp(join(repositoryRoot, "apps/desktop/src-tauri/icons/128x128@2x.png"), join(iconDirectory, "donut-mark.png"));
-  await cp(join(iconDirectory, "donut-mark.png"), join(installedApp, "icon.png"));
+  for (const size of [24, 32, 64, 128, 256, 512]) {
+    const iconDirectory = join(iconRoot, `${size}x${size}/apps`);
+    await mkdir(iconDirectory, { recursive: true });
+    await cp(join(installedApp, `dist/icons/donut-mark-${size}.png`), join(iconDirectory, "donut-mark.png"));
+  }
+  const symbolicDirectory = join(iconRoot, "scalable/apps");
+  await mkdir(symbolicDirectory, { recursive: true });
+  await cp(join(installedApp, "dist/icons/donut-mark-symbolic.svg"), join(symbolicDirectory, "donut-mark-symbolic.svg"));
   await writeFile(join(documentationDirectory, "copyright"), `Donut Mark ${version}
 Source: https://github.com/w4yne00/Donut-Mark
 Application license: /opt/donut-mark/app/LICENSE

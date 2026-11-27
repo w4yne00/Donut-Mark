@@ -1,3 +1,4 @@
+import { createElement } from "react";
 import {
   contextMenuPositionFromEvent,
   createDefaultAppRuntime,
@@ -12,6 +13,27 @@ import {
 import type { ElectronBridge } from "../electron/bridge";
 
 const menuPrefixes = { editor: "markra:electron-editor", fileTree: "markra:electron-file-tree" };
+
+const createFileTreeMenu: AppRuntime["menu"]["createMarkdownFileTreeContextMenuItems"] = (handlers, language, file) =>
+  createMarkdownFileTreeContextMenuEntries(handlers, language, file, menuPrefixes).map((entry) =>
+    entry.kind === "item" && entry.id === `${menuPrefixes.fileTree}:new`
+      ? {
+        ...entry,
+        icon: createElement("span", {
+          "aria-hidden": true,
+          style: {
+            display: "block",
+            width: 16,
+            height: 16,
+            backgroundColor: "currentColor",
+            maskImage: 'url("/icons/donut-mark-symbolic.svg")',
+            maskSize: "contain",
+            maskRepeat: "no-repeat"
+          }
+        })
+      }
+      : entry
+  );
 
 function unavailable(feature: string): Promise<never> {
   return Promise.reject(new Error(`麒麟基础包暂不支持${feature}。`));
@@ -86,8 +108,7 @@ export function createElectronRuntime(bridge: ElectronBridge): AppRuntime {
       },
       createEditorContextMenuItems: (handlers, language, options) =>
         createEditorContextMenuEntries(handlers, language, options, menuPrefixes),
-      createMarkdownFileTreeContextMenuItems: (handlers, language, file) =>
-        createMarkdownFileTreeContextMenuEntries(handlers, language, file, menuPrefixes),
+      createMarkdownFileTreeContextMenuItems: createFileTreeMenu,
       installEditorContextMenu: async (target, handlers, language = "en", options = {}) => {
         let closeMenu: RuntimeCleanup | null = null;
         const onContextMenu = (event: Event) => {
@@ -111,7 +132,7 @@ export function createElectronRuntime(bridge: ElectronBridge): AppRuntime {
       },
       showMarkdownFileTreeContextMenu: async (handlers, language, file) => {
         showContextMenu(document, {
-          entries: createMarkdownFileTreeContextMenuEntries(handlers, language, file, menuPrefixes),
+          entries: createFileTreeMenu(handlers, language, file),
           position: currentContextMenuPosition(document)
         });
       }

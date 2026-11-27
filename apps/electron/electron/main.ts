@@ -65,7 +65,7 @@ function createWindow({ settings = false, path, target, blank = false }: {
     show: false,
     title: "Donut Mark",
     backgroundColor: "#ffffff",
-    icon: join(bundleDirectory, "../icon.png"),
+    icon: join(rendererDirectory, "icons/donut-mark-32.png"),
     webPreferences: {
       preload: join(bundleDirectory, "preload.cjs"),
       sandbox: true,

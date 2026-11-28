@@ -2677,7 +2677,7 @@ describe("Markra workspace", () => {
     expect(settingsGroups[0]).not.toHaveClass("divide-y");
     expect(settingsGroups.some((group) => group.classList.contains("divide-y"))).toBe(true);
     expect(screen.getByText(`Markra ${desktopPackage.version}`)).toBeInTheDocument();
-    expect(screen.getByText(`Markra v${desktopPackage.version}`)).toBeInTheDocument();
+    expect(screen.getByText(`Donut Mark v${desktopPackage.version}`)).toBeInTheDocument();
     const categoryButtons = Array.from(container.querySelectorAll(".settings-sidebar nav button"));
     expect(categoryButtons.map((button) => button.textContent)).toEqual([
       "General",

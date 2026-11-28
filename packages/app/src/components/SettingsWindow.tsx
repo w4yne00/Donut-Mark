@@ -225,6 +225,7 @@ export function SettingsWindow() {
         />
         <SettingsContent
           activeCategory={activeSettingsCategory}
+          fullBleed={activeSettingsCategory === "providers" && !intranetAi}
           platform={settingsPlatform}
           translate={translate}
           onClose={showSettingsCloseButton ? handleCloseSettings : undefined}

@@ -167,7 +167,7 @@ export function SettingsSidebar({
       </nav>
 
       <div className="border-t border-(--border-default) px-7 py-4 text-[12px] leading-5 font-[560] text-(--text-secondary) max-[700px]:hidden">
-        Markra v{appVersion}
+        Donut Mark v{appVersion}
       </div>
     </aside>
   );
@@ -204,12 +204,14 @@ function SettingsNavButton({
 export function SettingsContent({
   activeCategory,
   children,
+  fullBleed = false,
   onClose,
   platform,
   translate
 }: {
   activeCategory: SettingsCategory;
   children: ReactNode;
+  fullBleed?: boolean;
   onClose?: () => unknown;
   platform?: DesktopPlatform;
   translate: Translate;
@@ -251,7 +253,7 @@ export function SettingsContent({
       <div
         ref={scrollRef}
         className={
-          activeCategory === "providers"
+          fullBleed
             ? "settings-scroll min-h-0 flex-1 overflow-hidden overscroll-none p-0"
             : "settings-scroll min-h-0 flex-1 overflow-auto overscroll-none px-8 py-7 max-[700px]:px-4 max-[700px]:py-4"
         }

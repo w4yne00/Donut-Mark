@@ -42,8 +42,8 @@ export function IntranetAiSettings({ service, translate }: {
   ] as const;
 
   return (
-    <SettingsSection label={translate("settings.sections.aiProviders")}>
-      <fieldset disabled={busy} className="m-0 min-w-0 border-0 p-0">
+    <fieldset disabled={busy} className="m-0 min-w-0 border-0 p-0">
+      <SettingsSection label={translate("settings.sections.aiProviders")}>
         {fields.map(({ key, label, ...field }) => (
           <SettingsRow key={key} title={label} description={"description" in field ? field.description : undefined} action={
             <SettingsTextInput
@@ -65,8 +65,8 @@ export function IntranetAiSettings({ service, translate }: {
             {translate(saved ? "settings.ai.saved" : "settings.ai.saveProviders")}
           </SettingsButton>
         } />
-        {error ? <p role="alert" className="my-2 text-sm text-(--text-secondary)">{error}</p> : null}
-      </fieldset>
-    </SettingsSection>
+      </SettingsSection>
+      {error ? <p role="alert" className="my-2 text-sm text-(--text-secondary)">{error}</p> : null}
+    </fieldset>
   );
 }

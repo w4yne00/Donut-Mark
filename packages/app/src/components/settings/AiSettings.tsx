@@ -136,6 +136,7 @@ export function AiSettings({
   onUpdateAcpAgentSettings,
   onUpdatePreferences,
   preferences,
+  showAcpAgent = true,
   translate
 }: {
   acpAgentSettings: AcpAgentSettings;
@@ -143,6 +144,7 @@ export function AiSettings({
   onUpdateAcpAgentSettings: (settings: AcpAgentSettings) => unknown;
   onUpdatePreferences: (preferences: EditorPreferences) => unknown;
   preferences: EditorPreferences;
+  showAcpAgent?: boolean;
   translate: SettingsTranslate;
 }) {
   const quickActionPrompts = preferences.aiQuickActionPrompts ?? defaultAiQuickActionPrompts;
@@ -238,7 +240,7 @@ export function AiSettings({
         />
       </SettingsSection>
 
-      <SettingsSection label={translate("settings.sections.acpAgent")}>
+      {showAcpAgent ? <SettingsSection label={translate("settings.sections.acpAgent")}>
         <SettingsRow
           title={translate("settings.ai.acpAgentEnabled")}
           description={translate("settings.ai.acpAgentEnabledDescription")}
@@ -311,7 +313,7 @@ export function AiSettings({
             />
           }
         />
-      </SettingsSection>
+      </SettingsSection> : null}
 
       <SettingsSection label={translate("settings.sections.aiPrompts")}>
         {aiQuickActionIds.map((actionId) => {

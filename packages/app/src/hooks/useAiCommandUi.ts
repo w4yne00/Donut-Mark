@@ -10,9 +10,10 @@ import {
 } from "@markra/ai";
 import { getProviderCapabilities, type AiProviderConfig } from "@markra/providers";
 import type { I18nKey } from "@markra/shared";
-import { requestNativeChat, requestNativeChatStream } from "../lib/tauri";
+import { nativeChatStreamOptions } from "../lib/tauri/native-ai";
 import { runAcpInlineAiAgent } from "../lib/acp-agent";
 import type { AcpAgentSettings } from "../lib/settings/app-settings";
+import { getAppRuntime } from "../runtime";
 
 type AiTextDiffResult = Extract<AiDiffResult, { type: "insert" | "replace" }>;
 export type AiCommandStatus = "idle" | "composing" | "thinking" | "streaming" | "suggestion" | "error";
@@ -24,8 +25,9 @@ type AiCommandContext = {
   getPendingResult?: () => AiDiffResult | null;
   getSelectedAcpModelId?: () => string | null;
   getSelection: () => AiSelectionContext | null;
+  isDocumentCurrent?: (content: string) => boolean;
   model: string | null;
-  onAiResult: (result: AiDiffResult, previewId?: string) => unknown;
+  onAiResult: (result: AiDiffResult, previewId?: string, documentContent?: string) => unknown;
   provider: AiProviderConfig | null;
   selectedAcpModelId?: string | null;
   settingsLoading: boolean;
@@ -101,7 +103,8 @@ export function useAiCommandUi(ctx: AiCommandContext) {
       return;
     }
 
-    const acpAgentSettings = ctx.acpAgentSettings;
+    const intranetAi = Boolean(getAppRuntime().ai.intranet);
+    const acpAgentSettings = intranetAi ? null : ctx.acpAgentSettings;
     const runWithAcpAgent = acpAgentSettings?.enabled === true && Boolean(acpAgentSettings.command.trim());
 
     if (!runWithAcpAgent && (!ctx.provider || !ctx.model)) {
@@ -127,7 +130,8 @@ export function useAiCommandUi(ctx: AiCommandContext) {
 
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
-    const abortController = runWithAcpAgent ? new AbortController() : null;
+    const previewId = `intranet-inline-${requestId}`;
+    const abortController = runWithAcpAgent || intranetAi ? new AbortController() : null;
     abortControllerRef.current = abortController;
     setStatus("thinking");
     try {
@@ -159,9 +163,7 @@ export function useAiCommandUi(ctx: AiCommandContext) {
             complete: (provider, model, messages, completionOptions) =>
               chatCompletionStream(provider, model, messages, {
                 ...completionOptions,
-                fallbackTransport: requestNativeChat,
-                streamTransport: requestNativeChatStream,
-                useVercelAiSdk: true
+                ...nativeChatStreamOptions(intranetAi ? abortController?.signal : undefined)
               }),
             documentContent,
             documentPath: ctx.documentPath ?? null,
@@ -176,19 +178,25 @@ export function useAiCommandUi(ctx: AiCommandContext) {
               if (requestIdRef.current !== requestId) return;
               setStatus(agentStatusFromEvent(event));
               const streamedReplacement = agentReplacementFromEvent(event);
-              if (!streamedReplacement) return;
+              if (!streamedReplacement || ctx.isDocumentCurrent?.(documentContent) === false) return;
 
-              ctx.onAiResult({
+              const result: AiTextDiffResult = {
                 from: target.from,
                 original: target.original,
                 replacement: streamedReplacement,
                 to: target.to,
                 type: target.type
-              });
+              };
+              if (intranetAi) ctx.onAiResult(result, previewId, documentContent);
+              else ctx.onAiResult(result);
             },
             workspaceFiles: ctx.workspaceFiles ?? []
           });
       if (requestIdRef.current !== requestId) return;
+      if (ctx.isDocumentCurrent?.(documentContent) === false) {
+        setStatus("idle");
+        return;
+      }
 
       if (!response.content.trim()) {
         ctx.onAiResult({ message: message("app.aiEmptyResponse"), type: "error" });
@@ -196,13 +204,15 @@ export function useAiCommandUi(ctx: AiCommandContext) {
         return;
       }
 
-      ctx.onAiResult({
+      const result: AiTextDiffResult = {
         from: target.from,
         original: target.original,
         replacement: response.content,
         to: target.to,
         type: target.type
-      });
+      };
+      if (intranetAi) ctx.onAiResult(result, previewId, documentContent);
+      else ctx.onAiResult(result);
       setPrompt("");
       setStatus("suggestion");
     } catch (error) {

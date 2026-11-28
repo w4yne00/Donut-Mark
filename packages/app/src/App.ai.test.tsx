@@ -24,8 +24,11 @@ import {
   renderApp
 } from "./test/app-harness";
 import { agentSessionSummary, storedAgentSession } from "./test/ai-fixtures";
+import { configureAppRuntime, createDefaultAppRuntime, resetAppRuntimeForTests } from "./runtime";
 
 installAppTestHarness();
+
+afterEach(() => resetAppRuntimeForTests());
 
 async function settleEditorUpdates() {
   await new Promise((resolve) => {
@@ -55,7 +58,107 @@ async function expectVisualMarkdownText(text: string) {
   });
 }
 
+async function renderIntranetAiPreviews() {
+  const runtime = createDefaultAppRuntime();
+  runtime.ai.intranet = {
+    getConfig: async () => ({ baseUrl: "http://model-host/v1", model: "local-model", apiKey: "" }),
+    saveConfig: async (config) => config
+  };
+  runtime.ai.requestChatStream = vi.fn(async (_request, onChunk) => {
+    const toolCalls = ["First", "Second"].map((paragraph, index) => ({
+      index,
+      id: `replace-${index}`,
+      type: "function",
+      function: {
+        name: "replace_content",
+        arguments: JSON.stringify({
+          targetKind: "block",
+          originalText: `${paragraph} paragraph`,
+          replacement: `Improved ${paragraph.toLowerCase()} paragraph`
+        })
+      }
+    }));
+    onChunk(`data: ${JSON.stringify({ choices: [{ delta: { tool_calls: toolCalls }, finish_reason: "tool_calls" }] })}\n\n`);
+    onChunk("data: [DONE]\n\n");
+    return { status: 200 };
+  });
+  configureAppRuntime(runtime);
+  mockedGetStoredAiSettings.mockResolvedValue({ providers: [{
+    id: "intranet-model",
+    name: "Local AI",
+    type: "openai-compatible",
+    apiStyle: "openai-compatible",
+    baseUrl: "http://model-host/v1",
+    apiKey: "",
+    enabled: true,
+    defaultModelId: "local-model",
+    models: [{ id: "local-model", name: "Local model", enabled: true, capabilities: ["text", "tools"] }]
+  }] });
+  mockedGetStoredWorkspaceState.mockResolvedValue({
+    aiAgentSessionId: "session-app",
+    filePath: mockNativePath,
+    fileTreeOpen: false,
+    folderName: null,
+    folderPath: null,
+    openFilePaths: [mockNativePath]
+  });
+  mockedReadNativeMarkdownFile.mockResolvedValue({
+    content: "First paragraph\n\nSecond paragraph",
+    name: "native.md",
+    path: mockNativePath
+  });
+  renderApp();
+  await expectVisualMarkdownText("First paragraph");
+  fireEvent.click(screen.getByRole("button", { name: "Toggle Markra AI" }));
+  const panel = await screen.findByRole("complementary", { name: "Markra AI" });
+  fireEvent.change(within(panel).getByRole("textbox", { name: "Markra AI message" }), {
+    target: { value: "Improve both paragraphs" }
+  });
+  await waitFor(() => expect(within(panel).getByRole("button", { name: "Send message" })).toBeEnabled());
+  fireEvent.click(within(panel).getByRole("button", { name: "Send message" }));
+  const view = await visibleEditorView();
+  await waitFor(() => expect(within(view.dom).getAllByRole("button", { name: "Apply" })).toHaveLength(2));
+  return view;
+}
+
 describe("Markra AI workspace", () => {
+  it.each([0, 1])("accepts both intranet AI previews when accepting paragraph %i first", async (firstIndex) => {
+    const view = await renderIntranetAiPreviews();
+    fireEvent.click(within(view.dom).getAllByRole("button", { name: "Apply" })[firstIndex]);
+    expect(view.state.doc.toString()).toBe(firstIndex === 0
+      ? "Improved first paragraph\n\nSecond paragraph"
+      : "First paragraph\n\nImproved second paragraph");
+    fireEvent.click(within(view.dom).getByRole("button", { name: "Apply" }));
+    expect(view.state.doc.toString()).toBe("Improved first paragraph\n\nImproved second paragraph");
+    expect(within(view.dom).queryByRole("button", { name: "Apply" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the remaining intranet AI preview valid after appending a suggestion", async () => {
+    const view = await renderIntranetAiPreviews();
+    fireEvent.click(within(view.dom).getAllByRole("button", { name: "Append" })[0]);
+    expect(view.state.doc.toString()).toBe("First paragraph\n\nImproved first paragraph\n\nSecond paragraph");
+    fireEvent.click(within(view.dom).getByRole("button", { name: "Apply" }));
+    expect(view.state.doc.toString()).toBe("First paragraph\n\nImproved first paragraph\n\nImproved second paragraph");
+  });
+
+  it("rejects a remaining intranet AI preview after a manual document change", async () => {
+    const view = await renderIntranetAiPreviews();
+    fireEvent.click(within(view.dom).getAllByRole("button", { name: "Apply" })[0]);
+    act(() => view.dispatch({ changes: { from: view.state.doc.length, insert: "\n\nManual note" } }));
+    const editedMarkdown = view.state.doc.toString();
+    fireEvent.click(within(view.dom).getByRole("button", { name: "Apply" }));
+    expect(view.state.doc.toString()).toBe(editedMarkdown);
+    expect(within(view.dom).queryByRole("button", { name: "Apply" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the other intranet AI preview valid when a proposal is rejected", async () => {
+    const view = await renderIntranetAiPreviews();
+    fireEvent.click(within(view.dom).getAllByRole("button", { name: "Reject" })[0]);
+    expect(view.state.doc.toString()).toBe("First paragraph\n\nSecond paragraph");
+    fireEvent.click(within(view.dom).getByRole("button", { name: "Apply" }));
+    expect(view.state.doc.toString()).toBe("First paragraph\n\nImproved second paragraph");
+  });
+
   it("opens a right-side Markra AI workspace from the titlebar", async () => {
     mockedGetStoredAiSettings.mockResolvedValue({
       defaultModelId: "gpt-5.5",
@@ -82,7 +185,7 @@ describe("Markra AI workspace", () => {
     });
     const { container } = renderApp();
 
-    await screen.findByText("Welcome to Markra");
+    await expectVisualMarkdownText("Welcome to Markra");
 
     fireEvent.click(screen.getByRole("button", { name: "Toggle Markra AI" }));
 

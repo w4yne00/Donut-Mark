@@ -281,12 +281,19 @@ export type AppMenuRuntime = {
   ) => Promise<unknown>;
 };
 
+export type IntranetAiConfig = { baseUrl: string; model: string; apiKey: string };
+
 export type AppAiRuntime = {
+  intranet?: {
+    getConfig: () => Promise<IntranetAiConfig>;
+    saveConfig: (config: IntranetAiConfig) => Promise<IntranetAiConfig>;
+  };
   requestAiJson: (request: NativeAiHttpRequest) => Promise<NativeAiHttpResponse>;
   requestChat: (request: NativeAiChatRequest) => Promise<NativeAiHttpResponse>;
   requestChatStream: (
     request: NativeAiChatRequest,
-    onChunk: (chunk: string) => unknown
+    onChunk: (chunk: string) => unknown,
+    signal?: AbortSignal
   ) => Promise<NativeAiStreamResponse>;
 };
 

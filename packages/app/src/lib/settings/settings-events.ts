@@ -1,5 +1,6 @@
 import { normalizeAiSettings } from "@markra/providers";
 import {
+  getStoredAiSettings,
   isAppTheme,
   normalizeAppThemePreferences,
   normalizeBackupSettings,
@@ -299,9 +300,14 @@ export async function notifyAppAiSettingsChanged(settings: AiProviderSettings) {
 }
 
 export async function listenAppAiSettingsChanged(onAiSettingsChanged: (settings: AiProviderSettings) => unknown) {
-  if (!getAppRuntime().events.isAvailable()) return () => {};
+  const { ai, events } = getAppRuntime();
+  if (!events.isAvailable()) return () => {};
+  if (ai.intranet) {
+    return events.listen("markra://intranet-ai-config-changed", () =>
+      getStoredAiSettings().then(onAiSettingsChanged).catch(() => console.warn("无法刷新编辑窗口的内网 AI 设置。")));
+  }
 
-  return getAppRuntime().events.listen<AiSettingsChangedPayload>(aiSettingsChangedEvent, (event) => {
+  return events.listen<AiSettingsChangedPayload>(aiSettingsChangedEvent, (event) => {
     onAiSettingsChanged(normalizeAiSettings(event.payload.settings));
   });
 }

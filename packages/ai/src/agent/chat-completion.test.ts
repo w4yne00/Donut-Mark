@@ -17,6 +17,24 @@ function provider(overrides: Partial<AiProviderConfig> = {}): AiProviderConfig {
 }
 
 describe("chatCompletion", () => {
+  it("emits each SSE reply when a CRLF delimiter is split between network chunks", async () => {
+    const onDelta = vi.fn();
+    const event = (content: string, finish_reason?: string) =>
+      `data: ${JSON.stringify({ choices: [{ delta: { content }, finish_reason }] })}`;
+    await expect(chatCompletionStream(provider(), "gpt-5.5", [{ role: "user", content: "Hello" }], {
+      onDelta,
+      async streamTransport(_request, onChunk) {
+        onChunk(event("First") + "\r\n\r");
+        expect(onDelta).not.toHaveBeenCalled();
+        onChunk("\n" + event(" second", "stop") + "\r\n");
+        expect(onDelta.mock.calls).toEqual([["First"]]);
+        onChunk("\r\n" + "data: [DONE]\r\n\r\n");
+        expect(onDelta.mock.calls).toEqual([["First"], [" second"]]);
+        return { status: 200 };
+      }
+    })).resolves.toMatchObject({ content: "First second" });
+  });
+
   it("streams OrcaRouter text, reasoning and tool arguments through the existing compatible transport", async () => {
     const config = createDefaultAiSettings().providers.find((item) => item.id === "orcarouter");
     expect(config).toBeDefined();

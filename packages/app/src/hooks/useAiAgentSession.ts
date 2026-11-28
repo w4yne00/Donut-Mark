@@ -30,7 +30,9 @@ import {
 } from "@markra/ai";
 import { getProviderCapabilities, type AiProviderConfig } from "@markra/providers";
 import type { I18nKey } from "@markra/shared";
-import { requestNativeChat, requestNativeChatStream, requestNativeWebResource } from "../lib/tauri";
+import { getAppRuntime } from "../runtime";
+import { requestNativeChat, requestNativeWebResource } from "../lib/tauri";
+import { nativeChatStreamOptions } from "../lib/tauri/native-ai";
 import {
   getStoredAcpAgentSettings,
   getStoredAiAgentPreferences,
@@ -77,9 +79,10 @@ type AiAgentSessionContext = {
   getSectionAnchors?: () => AiDocumentAnchor[];
   getSelection?: () => AiSelectionContext | null;
   getTableAnchors?: () => AiDocumentAnchor[];
+  isDocumentCurrent?: (content: string) => boolean;
   model: string | null;
   onAiPreviewReady?: (result: AiDiffResult, previewId?: string) => unknown;
-  onAiResult?: (result: AiDiffResult, previewId?: string) => unknown;
+  onAiResult?: (result: AiDiffResult, previewId?: string, documentContent?: string) => unknown;
   onSessionModelRestore?: (
     selection: Pick<StoredAiAgentSessionState, "agentModelId" | "agentProviderId">
   ) => unknown;
@@ -125,12 +128,14 @@ type PendingAcpPermissionFilter = {
 };
 
 export function useAiAgentSession(ctx: AiAgentSessionContext) {
+  const intranetAi = Boolean(getAppRuntime().ai.intranet);
   const [draft, setDraft] = useState("");
   const [draftAttachments, setDraftAttachments] = useState<DraftAiChatAttachment[]>([]);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [messages, setMessages] = useState<AiAgentPanelMessage[]>([]);
   const [thinkingEnabled, setThinkingEnabledState] = useState(false);
-  const [webSearchEnabled, setWebSearchEnabledState] = useState(false);
+  const [storedWebSearchEnabled, setWebSearchEnabledState] = useState(false);
+  const webSearchEnabled = !intranetAi && storedWebSearchEnabled;
   const [acpModels, setAcpModels] = useState<AcpAgentModelOption[]>([]);
   const [pendingAcpPermission, setPendingAcpPermission] = useState<AcpAgentPermissionPrompt | null>(null);
   const [selectedAcpModelId, setSelectedAcpModelId] = useState<string | null>(null);
@@ -240,6 +245,7 @@ export function useAiAgentSession(ctx: AiAgentSessionContext) {
   }, []);
 
   const setWebSearchEnabled = useCallback((action: SetStateAction<boolean>) => {
+    if (intranetAi) return;
     setWebSearchEnabledState((currentValue) => {
       const nextValue = typeof action === "function" ? action(currentValue) : action;
 
@@ -247,7 +253,7 @@ export function useAiAgentSession(ctx: AiAgentSessionContext) {
       saveStoredAiAgentPreferences({ webSearchEnabled: nextValue }).catch(() => {});
       return nextValue;
     });
-  }, []);
+  }, [intranetAi]);
 
   const selectAcpModel = useCallback((modelId: string) => {
     setSelectedAcpModelId((currentModelId) =>
@@ -446,7 +452,8 @@ export function useAiAgentSession(ctx: AiAgentSessionContext) {
   ]);
 
   useEffect(() => {
-    if (!sessionKey) return;
+    // A stopped intranet reply must not start a background request to generate a title.
+    if (intranetAi || !sessionKey) return;
     if (hydratedSessionKeyRef.current !== sessionKey) return;
     if (ctx.settingsLoading) return;
     if (!ctx.provider || !ctx.model) return;
@@ -492,7 +499,7 @@ export function useAiAgentSession(ctx: AiAgentSessionContext) {
     return () => {
       active = false;
     };
-  }, [ctx.model, ctx.provider, ctx.settingsLoading, ctx.workspaceKey, messages, sessionKey, status]);
+  }, [ctx.model, ctx.provider, ctx.settingsLoading, ctx.workspaceKey, intranetAi, messages, sessionKey, status]);
 
   const submit = useCallback(async (
     promptOverride?: string,
@@ -526,7 +533,7 @@ export function useAiAgentSession(ctx: AiAgentSessionContext) {
       return;
     }
 
-    const acpAgentSettings = await getStoredAcpAgentSettings().catch(() => null);
+    const acpAgentSettings = intranetAi ? null : await getStoredAcpAgentSettings().catch(() => null);
     const runWithAcpAgent = acpAgentSettings?.enabled === true && Boolean(acpAgentSettings.command.trim());
 
     if (!runWithAcpAgent && (!ctx.provider || !ctx.model)) {
@@ -576,7 +583,8 @@ export function useAiAgentSession(ctx: AiAgentSessionContext) {
     const runThinkingEnabled = thinkingEnabled;
     const runWebSearchEnabled = webSearchEnabled;
     const runWorkspaceKey = ctx.workspaceKey ?? null;
-    const acpAbortController = runWithAcpAgent ? new AbortController() : null;
+    const documentContent = ctx.getDocumentContent();
+    const abortController = runWithAcpAgent || intranetAi ? new AbortController() : null;
     const attachmentSessionId = runSessionKey ?? "default";
     let currentAttachments = options.attachments ?? [];
     let currentImages: Awaited<ReturnType<typeof resolveAiChatAttachments>>["images"] = [];
@@ -666,7 +674,7 @@ export function useAiAgentSession(ctx: AiAgentSessionContext) {
 
     runningRequestsRef.current.set(runSessionKey, {
       assistantMessageId,
-      ...(acpAbortController ? { cancel: () => acpAbortController.abort() } : {}),
+      ...(abortController ? { cancel: () => abortController.abort() } : {}),
       draft: "",
       messages: initialMessages,
       requestId,
@@ -682,6 +690,8 @@ export function useAiAgentSession(ctx: AiAgentSessionContext) {
     setPendingAcpPermission(null);
     setStatus("thinking");
     let preparedEditorPreview = false;
+    let staleEditorPreview = false;
+    let generatedPreviewIndex = 0;
     const latestPreparedEditorPreview: { current: { previewId?: string; result: AiDiffResult } | null } = {
       current: null
     };
@@ -690,7 +700,7 @@ export function useAiAgentSession(ctx: AiAgentSessionContext) {
     try {
       const response = runWithAcpAgent && acpAgentSettings
         ? await runAcpDocumentAgent({
-            documentContent: ctx.getDocumentContent(),
+            documentContent,
             documentPath: ctx.documentPath ?? null,
             history,
             images: currentImages,
@@ -768,18 +778,16 @@ export function useAiAgentSession(ctx: AiAgentSessionContext) {
             selectedModelId: selectedAcpModelId,
             selection: ctx.getSelection?.() ?? null,
             settings: acpAgentSettings,
-            signal: acpAbortController?.signal,
+            signal: abortController?.signal,
             workspaceKey: ctx.workspaceKey ?? null
           })
         : await runDocumentAiAgent({
             complete: (provider, model, messages, completionOptions) =>
               chatCompletionStream(provider, model, messages, {
                 ...completionOptions,
-                fallbackTransport: requestNativeChat,
-                streamTransport: requestNativeChatStream,
-                useVercelAiSdk: true
+                ...nativeChatStreamOptions(intranetAi ? abortController?.signal : undefined)
               }),
-            documentContent: ctx.getDocumentContent(),
+            documentContent,
             documentEndPosition: ctx.getDocumentEndPosition?.() ?? 0,
             documentPath: ctx.documentPath ?? null,
             history,
@@ -787,6 +795,11 @@ export function useAiAgentSession(ctx: AiAgentSessionContext) {
             model: ctx.model!,
             onPreviewResult: (result, previewId) => {
               if (!runIsCurrent()) return;
+              if (ctx.isDocumentCurrent?.(documentContent) === false) {
+                staleEditorPreview = true;
+                return;
+              }
+              if (intranetAi) previewId = `intranet-agent-${requestId}-${previewId ?? ++generatedPreviewIndex}`;
 
               const preview = sessionPreviewFromAiResult(result);
               if (preview) {
@@ -799,7 +812,8 @@ export function useAiAgentSession(ctx: AiAgentSessionContext) {
                 }));
               }
               if (activeSessionKeyRef.current === runSessionKey) {
-                ctx.onAiResult?.(result, previewId);
+                if (intranetAi) ctx.onAiResult?.(result, previewId, documentContent);
+                else ctx.onAiResult?.(result, previewId);
               }
             },
             onEvent: (event) => {
@@ -859,13 +873,14 @@ export function useAiAgentSession(ctx: AiAgentSessionContext) {
             selection: ctx.getSelection?.() ?? null,
             tableAnchors: ctx.getTableAnchors?.(),
             thinkingEnabled,
-            webSearchEnabled,
-            webSearchSettings: ctx.webSearchSettings ?? null,
-            webSearchTransport: requestNativeWebResource,
+            webSearchEnabled: runWebSearchEnabled,
+            webSearchSettings: intranetAi ? null : ctx.webSearchSettings ?? null,
+            webSearchTransport: intranetAi ? undefined : requestNativeWebResource,
             workspaceFiles: ctx.workspaceFiles ?? []
           });
 
       if (!runIsCurrent()) return;
+      if (staleEditorPreview) throw new Error(message("app.aiPreviewDocumentChanged"));
 
       if (!response.content.trim()) {
         if (preparedEditorPreview || response.preparedPreview) {
@@ -880,7 +895,8 @@ export function useAiAgentSession(ctx: AiAgentSessionContext) {
           cancelPendingAcpPermission({ requestId, sessionKey: runSessionKey });
           if (activeSessionKeyRef.current === runSessionKey) setStatus("idle");
           await persistCompletedRun(completedRequest);
-          if (latestPreparedEditorPreview.current && activeSessionKeyRef.current === runSessionKey) {
+          if (latestPreparedEditorPreview.current && activeSessionKeyRef.current === runSessionKey &&
+            ctx.isDocumentCurrent?.(documentContent) !== false) {
             ctx.onAiPreviewReady?.(
               latestPreparedEditorPreview.current.result,
               latestPreparedEditorPreview.current.previewId
@@ -915,7 +931,8 @@ export function useAiAgentSession(ctx: AiAgentSessionContext) {
       cancelPendingAcpPermission({ requestId, sessionKey: runSessionKey });
       if (activeSessionKeyRef.current === runSessionKey) setStatus("idle");
       await persistCompletedRun(completedRequest);
-      if (latestPreparedEditorPreview.current && activeSessionKeyRef.current === runSessionKey) {
+      if (latestPreparedEditorPreview.current && activeSessionKeyRef.current === runSessionKey &&
+        ctx.isDocumentCurrent?.(documentContent) !== false) {
         ctx.onAiPreviewReady?.(
           latestPreparedEditorPreview.current.result,
           latestPreparedEditorPreview.current.previewId
@@ -943,6 +960,7 @@ export function useAiAgentSession(ctx: AiAgentSessionContext) {
     cancelPendingAcpPermission,
     ctx,
     draft,
+    intranetAi,
     messages,
     selectedAcpModelId,
     sessionKey,

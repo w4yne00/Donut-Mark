@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { AppToaster } from "./AppToaster";
 import { AiProviderSettingsPanel } from "./AiProviderSettingsPanel";
+import { IntranetAiSettings } from "./settings/IntranetAiSettings";
 import {
   AiSettings,
   AppearanceSettings,
@@ -100,10 +101,12 @@ export function SettingsWindow() {
   } = settingsState;
   const appRuntime = getAppRuntime();
   const appFeatures = appRuntime.features;
+  const intranetAi = appRuntime.ai.intranet;
   const appLogs = appRuntime.logs;
   useRuntimeLogCapture();
   const hiddenCategories: SettingsCategory[] = [
-    ...(appFeatures.ai ? [] : (["ai", "providers", "web"] as SettingsCategory[])),
+    ...(appFeatures.ai ? [] : (["ai", "providers"] as SettingsCategory[])),
+    ...(appFeatures.ai && !intranetAi ? [] : (["web"] as SettingsCategory[])),
     ...(appFeatures.networkProxy ? [] : (["network"] as SettingsCategory[])),
     ...(appFeatures.export ? [] : (["export"] as SettingsCategory[])),
     ...(appFeatures.spellcheck ? [] : (["spellcheck"] as SettingsCategory[]))
@@ -260,13 +263,14 @@ export function SettingsWindow() {
               acpAgentSettings={acpAgentSettings}
               language={appLanguage.language}
               preferences={editorPreferences}
+              showAcpAgent={!intranetAi}
               translate={translate}
               onUpdateAcpAgentSettings={handleUpdateAcpAgentSettings}
               onUpdatePreferences={handleUpdateEditorPreferences}
             />
           ) : null}
           {appFeatures.ai && activeSettingsCategory === "providers" ? (
-            <AiProviderSettingsPanel
+            intranetAi ? <IntranetAiSettings service={intranetAi} translate={translate} /> : <AiProviderSettingsPanel
               saved={aiSettingsSaved}
               selectedProviderId={selectedAiProvider?.id}
               settings={aiSettings}
@@ -279,7 +283,7 @@ export function SettingsWindow() {
               onUpdateSettings={handleUpdateAiSettings}
             />
           ) : null}
-          {appFeatures.ai && activeSettingsCategory === "web" ? (
+          {appFeatures.ai && !intranetAi && activeSettingsCategory === "web" ? (
             <WebSearchSettings
               settings={webSearchSettings}
               translate={translate}

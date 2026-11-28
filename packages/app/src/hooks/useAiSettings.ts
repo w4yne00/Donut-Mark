@@ -9,6 +9,7 @@ import {
   type AiProviderSettings
 } from "../lib/settings/app-settings";
 import { listenAppAiSettingsChanged, notifyAppAiSettingsChanged } from "../lib/settings/settings-events";
+import { getAppRuntime } from "../runtime";
 
 export type AvailableAiTextModel = {
   capabilities: AiModelCapability[];
@@ -62,7 +63,7 @@ export function useAiSettings() {
 
   const selectInlineModel = useCallback(
     async (providerId: string, modelId: string) => {
-      if (!settings) return;
+      if (!settings || getAppRuntime().ai.intranet) return;
 
       const selectedProvider = settings.providers.find((provider) => provider.enabled && provider.id === providerId);
       const selectedModel = selectedProvider?.models.find((model) => isEnabledTextModel(model) && model.id === modelId);
@@ -87,7 +88,7 @@ export function useAiSettings() {
 
   const selectAgentModel = useCallback(
     async (providerId: string, modelId: string) => {
-      if (!settings) return;
+      if (!settings || getAppRuntime().ai.intranet) return;
 
       const selectedProvider = settings.providers.find((provider) => provider.enabled && provider.id === providerId);
       const selectedModel = selectedProvider?.models.find((model) => isEnabledTextModel(model) && model.id === modelId);

@@ -36,6 +36,14 @@ describe("AiAgentPanel", () => {
     });
   });
 
+  it("omits web search for intranet sessions and exposes a stop action during streaming", () => {
+    const onInterrupt = vi.fn();
+    renderAgentPanel({ showWebSearchControl: false, status: "streaming", webSearchAvailable: true, onInterrupt });
+    expect(screen.queryByRole("button", { name: "Web search" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Stop AI command" }));
+    expect(onInterrupt).toHaveBeenCalledOnce();
+  });
+
   it("selects, pastes, previews, removes, and sends chat image attachments", () => {
     const file = new File([new Uint8Array([1, 2, 3])], "synthetic.png", { type: "image/png" });
     const draftAttachment: DraftAiChatAttachment = {

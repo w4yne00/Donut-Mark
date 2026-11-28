@@ -23,6 +23,22 @@ async function watchPath(kind: "file" | "tree", path: string, onChange: (event: 
 }
 
 const bridge: ElectronBridge = {
+  ai: {
+    getConfig: () => ipcRenderer.invoke("markra:ai-config"),
+    saveConfig: (config) => ipcRenderer.invoke("markra:ai-config-save", config),
+    async chat(id, { body, url }, onChunk) {
+      const listener = (_event: Electron.IpcRendererEvent, name: string, payload: unknown) => {
+        if (name === `markra:ai-chunk-${id}` && typeof payload === "string") onChunk?.(payload);
+      };
+      if (onChunk) ipcRenderer.on("markra:event", listener);
+      try {
+        return await ipcRenderer.invoke("markra:ai-chat", id, { body, url }, Boolean(onChunk));
+      } finally {
+        if (onChunk) ipcRenderer.removeListener("markra:event", listener);
+      }
+    },
+    stop: (id) => ipcRenderer.invoke("markra:ai-stop", id)
+  },
   files: {
     openMarkdownFile: (labels) => ipcRenderer.invoke("markra:file-open", labels),
     openMarkdownPath: (labels) => ipcRenderer.invoke("markra:path-open", labels),

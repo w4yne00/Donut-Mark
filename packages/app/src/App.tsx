@@ -2175,13 +2175,18 @@ function WorkspaceApp() {
       return;
     }
 
+    if (intranetAi && intranetPreviews.current) {
+      const documentContent = getAiDocumentContent();
+      intranetPreviews.current.isCurrent = () => isCurrentAiDocument(documentContent);
+    }
+
     const remainingPreviews = editor.listAiPreviews();
     updateAiResults(remainingPreviews);
     if (remainingPreviews.length === 0) {
       editor.clearAiSelection();
       handleAiCommandClose();
     }
-  }, [aiResults, editor, handleAiCommandClose, intranetAi, readOnlyMode, translate, updateAiResults]);
+  }, [aiResults, editor, getAiDocumentContent, handleAiCommandClose, intranetAi, isCurrentAiDocument, readOnlyMode, translate, updateAiResults]);
   const handleRejectAiResult = useCallback((result?: AiDiffResult | null, previewId?: string) => {
     editor.clearAiSelection();
     editor.clearAiPreview(result ?? undefined, { previewId });

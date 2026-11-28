@@ -1,4 +1,66 @@
 <p align="center">
+  <img src="apps/electron/public/icons/donut-mark-256.png" width="96" alt="Donut Mark" />
+</p>
+
+# Donut Mark for Kylin
+
+English | [简体中文](README.zh-CN.md)
+
+Donut Mark is an offline Markdown editor for **Kylin Desktop V10 SP1 2403 ARM64**, based on [Markra](https://github.com/markrahq/markra) 2.14.9. The Kylin edition uses Electron and the shared editor, with local CSS themes and a configurable OpenAI-compatible AI service.
+
+## Kylin download and installation
+
+[Download donut-mark_2.14.9-1_arm64.deb](https://github.com/w4yne00/Donut-Mark/releases/download/kylin-v2.14.9-1/donut-mark_2.14.9-1_arm64.deb) · [Release notes](https://github.com/w4yne00/Donut-Mark/releases/tag/kylin-v2.14.9-1)
+
+Application version: **2.14.9**. Kylin package revision: **2.14.9-1**. This package is for ARM64.
+
+```sh
+sudo dpkg -i donut-mark_2.14.9-1_arm64.deb
+```
+
+Launch **Donut Mark** from the application menu as a normal user, or run:
+
+```sh
+donut-mark /path/to/document.md
+```
+
+The package includes Electron and supports offline installation on the target Kylin system with its required system libraries present. It does not replace glibc or WebKitGTK. Do not launch the editor with `sudo`.
+
+## Kylin features
+
+- Local Markdown editing in preview, source and split modes, with Chinese input, save/reopen, multiple windows and external file updates.
+- Import a local CSS file or select a theme directory, with separate light/dark themes and refresh across open windows.
+- Configure a service address, model ID and optional API key in **Settings → AI providers**. AI supports streaming replies, stopping generation and document edits that require confirmation.
+- Bundled Donut Mark icons, consistent settings layout and the IPC listener warning fix.
+
+The Kylin edition does not provide AI web search, export, spellcheck or automatic updates. Model requests use the configured service; local editing remains available when AI is unavailable. External theme resources are not fetched.
+
+## Verification and documentation
+
+The package has been tested in a UTM Kylin ARM64 virtual machine using the normal UKUI/X11 desktop. **Physical ARM64 hardware and a strictly isolated intranet model deployment remain unverified.** See [acceptance issue #5](https://github.com/w4yne00/Donut-Mark/issues/5) for the completed checks and remaining items.
+
+- [Kylin build, usage and acceptance record](apps/electron/麒麟版说明.md)
+- [Contributing](CONTRIBUTING.md)
+- [AGPL-3.0 license](LICENSE)
+
+To build the Kylin package from source:
+
+```sh
+pnpm install --frozen-lockfile
+pnpm --filter @markra/electron build
+node apps/electron/scripts/package-deb.mjs
+```
+
+The output is `apps/electron/build/donut-mark_2.14.9-1_arm64.deb`. Local runtime ZIP packaging is described in the Kylin guide.
+
+## Upstream
+
+This project retains Markra's editor and open-source attribution. The following upstream documentation describes Markra's other editions; their feature lists and downloads do not define support in this Kylin package.
+
+<details>
+<summary>Original Markra documentation</summary>
+
+<p align="center">
   <img src="apps/desktop/app-icon.svg" width="96" alt="Markra logo" />
 </p>
 
@@ -278,3 +340,5 @@ Thanks to everyone who has helped shape Markra through code, docs, design, testi
 ## License
 
 Markra is licensed under AGPL-3.0.
+
+</details>

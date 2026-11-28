@@ -1,4 +1,66 @@
 <p align="center">
+  <img src="apps/electron/public/icons/donut-mark-256.png" width="96" alt="Donut Mark" />
+</p>
+
+# Donut Mark 麒麟版
+
+[English](README.md) | 简体中文
+
+Donut Mark 是面向 **银河麒麟桌面 V10 SP1 2403 ARM64** 的离线 Markdown 编辑器，基于 [Markra](https://github.com/markrahq/markra) 2.14.9。麒麟版使用 Electron 桌面入口和共享编辑器，支持本地 CSS 主题及可配置的 OpenAI 兼容 AI 服务。
+
+## 麒麟版下载与安装
+
+[下载 donut-mark_2.14.9-1_arm64.deb](https://github.com/w4yne00/Donut-Mark/releases/download/kylin-v2.14.9-1/donut-mark_2.14.9-1_arm64.deb) · [发布说明](https://github.com/w4yne00/Donut-Mark/releases/tag/kylin-v2.14.9-1)
+
+应用版本：**2.14.9**。麒麟安装包版本：**2.14.9-1**。本安装包仅适用于 ARM64。
+
+```sh
+sudo dpkg -i donut-mark_2.14.9-1_arm64.deb
+```
+
+安装后以普通用户从应用菜单启动 **Donut Mark**，也可运行：
+
+```sh
+donut-mark /path/to/document.md
+```
+
+安装包包含 Electron，在系统依赖已具备的目标麒麟环境中可断网安装，不替换 glibc 或 WebKitGTK。不要使用 `sudo` 启动编辑器。
+
+## 麒麟版功能
+
+- 本地 Markdown 预览、源码与分屏编辑，支持中文输入、保存重开、多窗口和外部文件变更刷新。
+- 导入单个 CSS 文件或选择主题目录，分别设置浅色、深色主题，并在已打开的窗口同步刷新。
+- 在「设置 → AI 服务商」填写服务地址、模型 ID 及可选密钥，支持流式回复、停止生成和需确认后应用的文档修改。
+- 随包提供 Donut Mark 图标，已统一设置页排版并修复 IPC 监听器数量警告。
+
+麒麟版暂不提供 AI 联网搜索、导出、拼写检查或自动更新。模型请求使用已配置的服务；AI 不可用时仍可本地编辑。外置主题中的在线资源不会被加载。
+
+## 验证状态与文档
+
+已在 UTM 麒麟 ARM64 虚拟机的正常 UKUI/X11 桌面完成验收记录中的检查。**物理 ARM64 设备与严格隔离的真实内网模型环境尚未验证。** 已通过和待验项目见[验收工单 #5](https://github.com/w4yne00/Donut-Mark/issues/5)。
+
+- [麒麟版构建、使用与验收记录](apps/electron/麒麟版说明.md)
+- [贡献指南](CONTRIBUTING.md)
+- [AGPL-3.0 许可证](LICENSE)
+
+从源码构建麒麟包：
+
+```sh
+pnpm install --frozen-lockfile
+pnpm --filter @markra/electron build
+node apps/electron/scripts/package-deb.mjs
+```
+
+产物位于 `apps/electron/build/donut-mark_2.14.9-1_arm64.deb`。使用本地运行时 ZIP 离线打包的方法见麒麟版说明。
+
+## 上游项目
+
+本项目沿用 Markra 编辑器并保留其开源署名。以下上游文档介绍 Markra 的其他版本，功能和下载范围不作为本麒麟安装包的支持承诺。
+
+<details>
+<summary>Markra 原始文档</summary>
+
+<p align="center">
   <img src="apps/desktop/app-icon.svg" width="96" alt="Markra logo" />
 </p>
 
@@ -278,3 +340,5 @@ Typora 兼容以基础外观为范围：复杂布局、条件规则、主题附�
 ## 许可证
 
 Markra 使用 AGPL-3.0 许可证。
+
+</details>
